@@ -1,14 +1,6 @@
 import {
-    collection,
-    addDoc,
-    getDocs,
-    query,
-    orderBy,
-    doc,
-    updateDoc,
-    arrayUnion,
-    getDoc,
-    Timestamp
+    collection, addDoc, getDocs,
+    doc, updateDoc, deleteDoc, arrayUnion, getDoc
 } from 'firebase/firestore';
 import { db } from './config';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -24,9 +16,13 @@ export interface Post {
     description: string;
     tags: string[];
     likes: number;
-    likedBy: string[];  // массив ID пользователей, кто лайкнул
+    likedBy: string[];
     comments: Comment[];
     createdAt: string;
+    forSale?: boolean;
+    price?: number | null;
+    currency?: string;
+    walletNftId?: string;
 }
 
 export interface Comment {
@@ -38,94 +34,76 @@ export interface Comment {
     createdAt: string;
 }
 
-// Создание поста
 export const createPost = async (postData: Omit<Post, 'id' | 'createdAt' | 'likes' | 'likedBy' | 'comments'>) => {
     try {
-        const newPost = {
+        const docRef = await addDoc(collection(db, 'posts'), {
             ...postData,
             likes: 0,
             likedBy: [],
             comments: [],
             createdAt: new Date().toISOString()
-        };
-
-        const docRef = await addDoc(collection(db, 'posts'), newPost);
+        });
         return { success: true, id: docRef.id };
     } catch (error: any) {
         return { success: false, error: error.message };
     }
 };
 
-// Получение всех постов
+// Без orderBy — сортуємо на клієнті (не потребує індексу)
 export const getPosts = async () => {
     try {
-        const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
-        const querySnapshot = await getDocs(q);
-
-        const posts: Post[] = [];
-        querySnapshot.forEach((doc) => {
-            posts.push({ id: doc.id, ...doc.data() } as Post);
-        });
-
+        const snapshot = await getDocs(collection(db, 'posts'));
+        const posts = snapshot.docs
+            .map(d => ({ id: d.id, ...d.data() }) as Post)
+            .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         return { success: true, posts };
     } catch (error: any) {
         return { success: false, error: error.message };
     }
 };
 
-// Лайк поста
-// Лайк поста
+// ← НОВА: видалити пост повністю
+export const deletePost = async (postId: string) => {
+    try {
+        await deleteDoc(doc(db, 'posts', postId));
+        return { success: true };
+    } catch (error: any) {
+        return { success: false, error: error.message };
+    }
+};
+
 export const likePost = async (postId: string, userId: string) => {
     try {
         const postRef = doc(db, 'posts', postId);
         const postDoc = await getDoc(postRef);
-
         if (postDoc.exists()) {
-            const postData = postDoc.data();
-            const likedBy = postData.likedBy || [];
-
+            const data    = postDoc.data();
+            const likedBy = data.likedBy || [];
             if (!likedBy.includes(userId)) {
-                // Добавляем лайк
-                await updateDoc(postRef, {
-                    likes: (postData.likes || 0) + 1,
-                    likedBy: arrayUnion(userId)
-                });
+                await updateDoc(postRef, { likes: (data.likes || 0) + 1, likedBy: arrayUnion(userId) });
             } else {
-                // Убираем лайк (если нужно реализовать дизлайк)
                 await updateDoc(postRef, {
-                    likes: Math.max((postData.likes || 0) - 1, 0),
+                    likes:   Math.max((data.likes || 0) - 1, 0),
                     likedBy: likedBy.filter((id: string) => id !== userId)
                 });
             }
         }
         return { success: true };
     } catch (error: any) {
-        console.error('Error liking post:', error);
         return { success: false, error: error.message };
     }
 };
 
-// Добавление комментария
 export const addComment = async (postId: string, comment: Omit<Comment, 'id' | 'createdAt'>) => {
     try {
-        const newComment = {
-            ...comment,
-            id: Date.now().toString(),
-            createdAt: new Date().toISOString()
-        };
-
-        const postRef = doc(db, 'posts', postId);
-        await updateDoc(postRef, {
-            comments: arrayUnion(newComment)
-        });
-
+        const newComment = { ...comment, id: Date.now().toString(), createdAt: new Date().toISOString() };
+        await updateDoc(doc(db, 'posts', postId), { comments: arrayUnion(newComment) });
         return { success: true, comment: newComment };
     } catch (error: any) {
         return { success: false, error: error.message };
     }
 };
 
-// Загрузка изображения
 export const uploadImage = async (file: File, path: string) => {
     try {
         const storageRef = ref(storage, path);

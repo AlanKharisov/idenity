@@ -9,8 +9,7 @@ import {
 } from '../firebase/posts';
 import { useAuth } from '../context/AuthContext';
 
-// Расширяем тип Post для UI с временным полем liked
-interface PostWithLiked extends Post {
+export interface PostWithLiked extends Post {
     liked: boolean;
 }
 
@@ -19,7 +18,6 @@ export const usePosts = () => {
     const [loading, setLoading] = useState(true);
     const { currentUser } = useAuth();
 
-    // Загрузка постов
     useEffect(() => {
         loadPosts();
     }, [currentUser]);
@@ -28,7 +26,6 @@ export const usePosts = () => {
         setLoading(true);
         const result = await getPosts();
         if (result.success && result.posts) {
-            // Добавляем поле liked для каждого поста
             const postsWithLiked = result.posts.map(post => ({
                 ...post,
                 liked: currentUser ? (post.likedBy || []).includes(currentUser.uid) : false
@@ -38,31 +35,39 @@ export const usePosts = () => {
         setLoading(false);
     };
 
-    // Создание поста
-    // Создание поста
-    const addPost = async (postData: any) => {
-        if (!currentUser) {
-            console.log('No current user');
-            return { success: false, error: 'No user logged in' };
-        }
-
-        console.log('Creating post with data:', postData);
+    // ← ВИПРАВЛЕНО: зберігаємо nftImage (відповідає Post інтерфейсу)
+    const addPost = async (postData: {
+        image: string;
+        title: string;
+        description: string;
+        tags?: string[];
+        category?: string;
+        blockchain?: string;
+        royalty?: number;
+        price?: number | null;
+        forSale?: boolean;
+        currency?: string;
+    }) => {
+        if (!currentUser) return { success: false, error: 'No user logged in' };
 
         const newPost = {
             userId: currentUser.uid,
             userName: currentUser.name,
             userAvatar: currentUser.avatar || '/img/default-avatar.png',
-            nftImage: postData.image || '/img/default-nft.png',
+            nftImage: postData.image,   // ← image → nftImage
             title: postData.title,
             description: postData.description,
-            tags: postData.tags || []
+            tags: postData.tags || [],
+            // Додаткові поля для NFT
+            ...(postData.category   && { category: postData.category }),
+            ...(postData.blockchain && { blockchain: postData.blockchain }),
+            ...(postData.royalty    && { royalty: postData.royalty }),
+            ...(postData.price      && { price: postData.price }),
+            ...(postData.forSale    !== undefined && { forSale: postData.forSale }),
+            ...(postData.currency   && { currency: postData.currency }),
         };
 
-        console.log('New post object:', newPost);
-
         const result = await createPost(newPost);
-        console.log('Create post result:', result);
-
         if (result.success) {
             await loadPosts();
             return { success: true };
@@ -70,15 +75,12 @@ export const usePosts = () => {
         return result;
     };
 
-    // Лайк поста
     const handleLike = async (postId: string) => {
         if (!currentUser) return;
-
         const result = await likePost(postId, currentUser.uid);
         if (result.success) {
-            // Оптимистичное обновление UI
-            setPosts(prevPosts =>
-                prevPosts.map(post => {
+            setPosts(prev =>
+                prev.map(post => {
                     if (post.id === postId) {
                         const wasLiked = post.liked;
                         return {
@@ -93,23 +95,20 @@ export const usePosts = () => {
         }
     };
 
-    // Добавление комментария
     const handleAddComment = async (postId: string, text: string) => {
         if (!currentUser || !text.trim()) return;
-
         const comment = {
             userId: currentUser.uid,
             userName: currentUser.name,
             userAvatar: currentUser.avatar || '/img/default-avatar.png',
             text
         };
-
         const result = await addComment(postId, comment);
         if (result.success && result.comment) {
-            setPosts(prevPosts =>
-                prevPosts.map(post =>
+            setPosts(prev =>
+                prev.map(post =>
                     post.id === postId
-                        ? { ...post, comments: [...(post.comments || []), result.comment] }
+                        ? { ...post, comments: [...(post.comments || []), result.comment!] }
                         : post
                 )
             );

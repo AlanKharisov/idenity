@@ -38,7 +38,6 @@ export const useAuth = () => {
     return context;
 };
 
-// Функція для створення гаманця
 const createWalletForUser = async (userId: string, email: string) => {
     try {
         const walletRef = doc(db, 'wallets', userId);
@@ -46,18 +45,13 @@ const createWalletForUser = async (userId: string, email: string) => {
             address: '0x' + Array.from({ length: 40 }, () =>
                 Math.floor(Math.random() * 16).toString(16)
             ).join(''),
-            email: email,
-            password: 'default', // Буде змінено при першому вході
+            email,
+            password: 'default',
             recoveryPhrase: generateRecoveryPhrase(),
-            balance: {
-                ICP: 100, // Бонус при реєстрації
-                POLYGON: 50,
-                SOLANA: 25
-            },
+            balance: { ICP: 100, POLYGON: 50, SOLANA: 25 },
             nfts: [],
             createdAt: new Date().toISOString()
         };
-
         await setDoc(walletRef, walletData);
         return walletData;
     } catch (error) {
@@ -67,47 +61,55 @@ const createWalletForUser = async (userId: string, email: string) => {
 };
 
 const generateRecoveryPhrase = (): string => {
-    const words = [
-        'Galaxy', 'Bamboo', 'Velvet', 'Pyramid', 'Harmony', 'Rocket',
-        'Symbol', 'Orbit', 'Wisdom', 'Foil', 'Trophy', 'Harbor'
-    ];
+    const words = ['Galaxy', 'Bamboo', 'Velvet', 'Pyramid', 'Harmony', 'Rocket', 'Symbol', 'Orbit', 'Wisdom', 'Foil', 'Trophy', 'Harbor'];
     return words.join(' ');
+};
+
+// ← ВИПРАВЛЕНО: геолокація з таймаутом 3 секунди — не висить вічно
+const getUserLocation = async (): Promise<string> => {
+    try {
+        const timeout = new Promise<string>((resolve) =>
+            setTimeout(() => resolve('Unknown location'), 3000)
+        );
+
+        const ipLocationPromise = getLocationByIP().then(loc => loc || '').catch(() => '');
+        const ipLocation = await Promise.race([ipLocationPromise, timeout]);
+
+        if (ipLocation && ipLocation !== 'Unknown location') return ipLocation;
+
+        if (navigator.geolocation) {
+            return new Promise((resolve) => {
+                const geoTimeout = setTimeout(() => resolve('Unknown location'), 4000);
+                navigator.geolocation.getCurrentPosition(
+                    async (position) => {
+                        clearTimeout(geoTimeout);
+                        const { latitude, longitude } = position.coords;
+                        const locationName = await getLocationFromCoords(latitude, longitude).catch(() => null);
+                        resolve(locationName || 'Unknown location');
+                    },
+                    () => {
+                        clearTimeout(geoTimeout);
+                        resolve('Unknown location');
+                    },
+                    { timeout: 4000 }
+                );
+            });
+        }
+
+        return 'Unknown location';
+    } catch {
+        return 'Unknown location';
+    }
 };
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [currentUser, setCurrentUser] = useState<UserData | null>(null);
     const [loading, setLoading] = useState(true);
 
-    const getUserLocation = async (): Promise<string> => {
-        try {
-            const ipLocation = await getLocationByIP();
-            if (ipLocation) return ipLocation;
-
-            if (navigator.geolocation) {
-                return new Promise((resolve) => {
-                    navigator.geolocation.getCurrentPosition(
-                        async (position) => {
-                            const { latitude, longitude } = position.coords;
-                            const locationName = await getLocationFromCoords(latitude, longitude);
-                            resolve(locationName || 'Unknown location');
-                        },
-                        () => resolve('Unknown location'),
-                        { timeout: 5000 }
-                    );
-                });
-            }
-            return 'Unknown location';
-        } catch {
-            return 'Unknown location';
-        }
-    };
-
     const updateUserLocation = async (location: string) => {
         if (!currentUser) return;
-
         try {
-            const userRef = doc(db, 'users', currentUser.uid);
-            await updateDoc(userRef, { location });
+            await updateDoc(doc(db, 'users', currentUser.uid), { location });
             setCurrentUser(prev => prev ? { ...prev, location } : null);
         } catch (error) {
             console.error('Error updating location:', error);
@@ -116,10 +118,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const updateUserProfile = async (data: { name?: string; bio?: string; avatar?: string; username?: string }) => {
         if (!currentUser) return;
-
         try {
-            const userRef = doc(db, 'users', currentUser.uid);
-            await updateDoc(userRef, data);
+            await updateDoc(doc(db, 'users', currentUser.uid), data);
             setCurrentUser(prev => prev ? { ...prev, ...data } : null);
         } catch (error) {
             console.error('Error updating profile:', error);
@@ -134,38 +134,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                const userRef = doc(db, 'users', user.uid);
-                const userDoc = await getDoc(userRef);
+            try {
+                if (user) {
+                    const userRef = doc(db, 'users', user.uid);
+                    const userDoc = await getDoc(userRef);
 
-                if (userDoc.exists()) {
-                    const userData = userDoc.data() as UserData;
-                    setCurrentUser(userData);
+                    if (userDoc.exists()) {
+                        setCurrentUser(userDoc.data() as UserData);
+                    } else {
+                        // ← ВИПРАВЛЕНО: геолокація не блокує — запускаємо паралельно
+                        const location = await getUserLocation();
+
+                        const newUser: UserData = {
+                            uid: user.uid,
+                            name: user.displayName || 'User',
+                            username: (user.email?.split('@')[0] || 'user') + Math.floor(Math.random() * 1000),
+                            email: user.email || '',
+                            avatar: user.photoURL || '/img/default-avatar.png',
+                            location,
+                            bio: '',
+                            createdAt: new Date().toISOString()
+                        };
+
+                        await setDoc(userRef, newUser);
+                        await createWalletForUser(user.uid, user.email || '');
+                        setCurrentUser(newUser);
+                    }
                 } else {
-                    const location = await getUserLocation();
-
-                    const newUser: UserData = {
-                        uid: user.uid,
-                        name: user.displayName || 'User',
-                        username: (user.email?.split('@')[0] || 'user') + Math.floor(Math.random() * 1000),
-                        email: user.email || '',
-                        avatar: user.photoURL || '/img/default-avatar.png',
-                        location: location,
-                        bio: '',
-                        createdAt: new Date().toISOString()
-                    };
-
-                    await setDoc(userRef, newUser);
-
-                    // Автоматично створюємо гаманець для нового користувача
-                    await createWalletForUser(user.uid, user.email || '');
-
-                    setCurrentUser(newUser);
+                    setCurrentUser(null);
                 }
-            } else {
+            } catch (error) {
+                console.error('Auth state change error:', error);
                 setCurrentUser(null);
+            } finally {
+                // ← ВИПРАВЛЕНО: setLoading(false) викликається ЗАВЖДИ
+                setLoading(false);
             }
-            setLoading(false);
         });
 
         return unsubscribe;
@@ -173,7 +177,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const login = async (email: string, password: string) => {
         try {
-            const result = await signInWithEmailAndPassword(auth, email, password);
+            await signInWithEmailAndPassword(auth, email, password);
             return { success: true };
         } catch (error: any) {
             return { success: false, error: error.message };
@@ -185,23 +189,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const result = await createUserWithEmailAndPassword(auth, email, password);
             await updateProfile(result.user, { displayName: name });
 
-            // Створюємо профіль в Firestore
             const location = await getUserLocation();
             const newUser: UserData = {
                 uid: result.user.uid,
-                name: name,
-                username: username,
-                email: email,
+                name,
+                username,
+                email,
                 phone: phone || '',
                 avatar: '/img/default-avatar.png',
-                location: location,
+                location,
                 bio: '',
                 createdAt: new Date().toISOString()
             };
 
             await setDoc(doc(db, 'users', result.user.uid), newUser);
-
-            // Створюємо гаманець
             await createWalletForUser(result.user.uid, email);
 
             return { success: true, user: newUser };
@@ -230,7 +231,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             updateUserProfile,
             refreshLocation
         }}>
-            {!loading && children}
+            {/* ← ВИПРАВЛЕНО: завжди рендеримо children, loading передаємо через контекст */}
+            {children}
         </AuthContext.Provider>
     );
 };
