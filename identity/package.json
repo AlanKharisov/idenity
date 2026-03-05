@@ -2,6 +2,7 @@
   "name": "identity",
   "version": "0.1.0",
   "private": true,
+  "homepage": "https://alankharisov.github.io/idenity",
   "dependencies": {
     "@solana/web3.js": "^1.98.4",
     "@testing-library/dom": "^10.4.1",
@@ -28,11 +29,16 @@
     "web-vitals": "^2.1.4",
     "web3": "^4.16.0"
   },
+  "devDependencies": {
+    "gh-pages": "^6.3.0"
+  },
   "scripts": {
     "start": "react-scripts start",
     "build": "react-scripts build",
     "test": "react-scripts test",
-    "eject": "react-scripts eject"
+    "eject": "react-scripts eject",
+    "predeploy": "npm run build",
+    "deploy": "gh-pages -d build"
   },
   "eslintConfig": {
     "extends": [
