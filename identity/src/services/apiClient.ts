@@ -1,6 +1,6 @@
 import { auth } from '../firebase/config';
 
-const BASE_URL = 'http://localhost:8081';
+const BASE_URL = 'http://13.48.84.220:8081'; // Ваш публічний IP сервера AWS
 
 async function getToken(): Promise<string | null> {
     try {
