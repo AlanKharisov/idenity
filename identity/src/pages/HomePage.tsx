@@ -1,37 +1,56 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { formatTime } from '../utils/formatters';
 import { usePosts } from '../hooks/usePosts';
 import { useAuth } from '../context/AuthContext';
-import { notifyLike, notifyComment } from '../firebase/notifications';
 import BuyModal from './BuyModal';
 
 const DEFAULT_AVATAR = '/img/default-avatar.png';
+
+const FILTER_OPTIONS = ['All', 'For Sale', 'Art', 'Music', 'Photography', 'Gaming', '3D', 'Collectible'];
 
 const HomePage: React.FC = () => {
     const { posts, loading, likePost, addComment, refreshPosts } = usePosts();
     const { currentUser } = useAuth();
 
-    const [searchQuery, setSearchQuery]   = useState('');
-    const [newComment, setNewComment]     = useState<Record<string, string>>({});
-    const [selectedPost, setSelectedPost] = useState<string | null>(null);
-    const [buyNft, setBuyNft]             = useState<any | null>(null);
+    const [searchQuery, setSearchQuery]     = useState('');
+    const [newComment, setNewComment]       = useState<Record<string, string>>({});
+    const [selectedPost, setSelectedPost]   = useState<string | null>(null);
+    const [buyNft, setBuyNft]               = useState<any | null>(null);
+
+    // ── Hamburger menu ────────────────────────────────────────────────────────
+    const [hamburgerOpen, setHamburgerOpen] = useState(false);
+    // ── Filter menu ───────────────────────────────────────────────────────────
+    const [filterOpen, setFilterOpen]       = useState(false);
+    const [activeFilter, setActiveFilter]   = useState('All');
+    const filterRef = useRef<HTMLDivElement>(null);
+
+    // Close filter dropdown when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+                setFilterOpen(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
 
     const filteredPosts = posts.filter(post => {
-        if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
-        return (
+        const matchesSearch = !q || (
             post.title?.toLowerCase().includes(q) ||
             post.description?.toLowerCase().includes(q) ||
             post.tags?.some(tag => tag.toLowerCase().includes(q))
         );
+        let matchesFilter = true;
+        if (activeFilter === 'For Sale') matchesFilter = !!post.forSale;
+        else if (activeFilter !== 'All') matchesFilter = (post as any).category === activeFilter;
+        return matchesSearch && matchesFilter;
     });
 
     const handleLike = async (post: any) => {
         if (!post.id || !currentUser) return;
         await likePost(post.id);
-        if (post.userId && post.userId !== currentUser.uid) {
-            await notifyLike(post.userId, post.title, currentUser.name || 'Someone');
-        }
     };
 
     const handleAddComment = async (post: any) => {
@@ -39,12 +58,8 @@ const HomePage: React.FC = () => {
         if (!text || !currentUser || !post.id) return;
         await addComment(post.id, text);
         setNewComment(prev => ({ ...prev, [post.id]: '' }));
-        if (post.userId && post.userId !== currentUser.uid) {
-            await notifyComment(post.userId, post.title, currentUser.name || 'Someone', text);
-        }
     };
 
-    // Після успішної купівлі — оновлюємо стрічку
     const handleBuySuccess = () => {
         setBuyNft(null);
         refreshPosts();
@@ -65,9 +80,65 @@ const HomePage: React.FC = () => {
     return (
         <div className="page home-page active">
 
-            {/* Пошук */}
-            <div className="search-bar">
-                <i className="fas fa-bars menu-icon"></i>
+            {/* ── Hamburger side drawer ── */}
+            <style>{`
+                @keyframes slideInDrawer { from { transform: translateX(-100%); } to { transform: translateX(0); } }
+                @keyframes fadeInOverlay  { from { opacity: 0; } to { opacity: 1; } }
+                .drawer-item-hover:hover { background: #f5f5f5 !important; }
+            `}</style>
+            {hamburgerOpen && (
+                <>
+                    <div
+                        style={{ ...st.drawerOverlay, animation: 'fadeInOverlay 0.2s ease' }}
+                        onClick={() => setHamburgerOpen(false)}
+                    />
+                    <div style={{ ...st.drawer, animation: 'slideInDrawer 0.25s ease' }}>
+                        <div style={st.drawerHeader}>
+                            <span style={st.drawerTitle}>Menu</span>
+                            <button style={st.drawerClose} onClick={() => setHamburgerOpen(false)}>✕</button>
+                        </div>
+                        {[
+                            { icon: '🏠', label: 'Home Feed',    filter: 'All'       },
+                            { icon: '🔥', label: 'Trending',     filter: 'All'       },
+                            { icon: '💰', label: 'For Sale',     filter: 'For Sale'  },
+                            { icon: '🎨', label: 'Art',          filter: 'Art'       },
+                            { icon: '🎵', label: 'Music',        filter: 'Music'     },
+                            { icon: '📸', label: 'Photography',  filter: 'Photography'},
+                            { icon: '🎮', label: 'Gaming',       filter: 'Gaming'    },
+                            { icon: '📦', label: 'Collectibles', filter: 'Collectible'},
+                        ].map(item => (
+                            <div
+                                key={item.label}
+                                className="drawer-item-hover"
+                                style={{
+                                    ...st.drawerItem,
+                                    background: activeFilter === item.filter && item.filter !== 'All' ? '#f0fff4' : 'white',
+                                    color:      activeFilter === item.filter && item.filter !== 'All' ? '#00aa44' : '#333',
+                                }}
+                                onClick={() => { setActiveFilter(item.filter); setHamburgerOpen(false); }}
+                            >
+                                <span style={{ marginRight: '12px', fontSize: '18px' }}>{item.icon}</span>
+                                <span style={{ fontSize: '15px' }}>{item.label}</span>
+                                {activeFilter === item.filter && item.filter !== 'All' && (
+                                    <span style={{ marginLeft: 'auto', color: '#01ff77', fontWeight: 'bold' }}>✓</span>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </>
+            )}
+
+            {/* ── Search bar ── */}
+            <div className="search-bar" style={{ position: 'relative' }}>
+                <button
+                    onClick={() => setHamburgerOpen(true)}
+                    style={st.hamburgerBtn}
+                    aria-label="Open menu"
+                >
+                    <span style={st.hamburgerLine} />
+                    <span style={st.hamburgerLine} />
+                    <span style={st.hamburgerLine} />
+                </button>
                 <div className="search-input">
                     <i className="fas fa-search"></i>
                     <input
@@ -77,29 +148,61 @@ const HomePage: React.FC = () => {
                         onChange={e => setSearchQuery(e.target.value)}
                     />
                 </div>
-                <i className="fas fa-ellipsis-v menu-icon"></i>
+
+                {/* Filter button + dropdown */}
+                <div ref={filterRef} style={{ position: 'relative' }}>
+                    <i
+                        className="fas fa-ellipsis-v menu-icon"
+                        style={{ cursor: 'pointer', color: filterOpen ? '#01ff77' : undefined }}
+                        onClick={() => setFilterOpen(o => !o)}
+                    />
+                    {filterOpen && (
+                        <div style={st.filterDropdown}>
+                            <div style={st.filterTitle}>Filter by</div>
+                            {FILTER_OPTIONS.map(opt => (
+                                <div
+                                    key={opt}
+                                    style={{
+                                        ...st.filterOption,
+                                        background: activeFilter === opt ? '#f0fff4' : 'white',
+                                        color:      activeFilter === opt ? '#01aa44' : '#333',
+                                        fontWeight: activeFilter === opt ? 'bold'   : 'normal',
+                                    }}
+                                    onClick={() => { setActiveFilter(opt); setFilterOpen(false); }}
+                                >
+                                    {activeFilter === opt && <span style={{ marginRight: '6px' }}>✓</span>}
+                                    {opt}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
             </div>
+
+            {/* Active filter badge */}
+            {activeFilter !== 'All' && (
+                <div style={st.filterBadge}>
+                    <span>Filtered: <strong>{activeFilter}</strong></span>
+                    <button style={st.filterBadgeClear} onClick={() => setActiveFilter('All')}>✕</button>
+                </div>
+            )}
 
             {filteredPosts.length === 0 ? (
                 <div style={{ textAlign: 'center', padding: '60px 20px', color: '#888' }}>
                     <div style={{ fontSize: '48px', marginBottom: '15px' }}>🎨</div>
-                    <p style={{ fontWeight: 'bold', marginBottom: '5px' }}>No NFTs yet</p>
-                    <p style={{ fontSize: '13px' }}>Be the first to create an NFT!</p>
+                    <p style={{ fontWeight: 'bold', marginBottom: '5px' }}>No NFTs found</p>
+                    <p style={{ fontSize: '13px' }}>Try a different search or filter</p>
                 </div>
             ) : (
                 filteredPosts.map(post => (
                     <div key={post.id} className="nft-post">
 
-                        {/* Автор — аватар завжди з onError fallback */}
                         <div className="user-info">
                             <div className="avatar">
                                 <img
                                     src={post.userAvatar || DEFAULT_AVATAR}
                                     alt="Avatar"
-                                    onError={e => {
-                                        e.currentTarget.onerror = null;
-                                        e.currentTarget.src = DEFAULT_AVATAR;
-                                    }}
+                                    onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = DEFAULT_AVATAR; }}
                                 />
                             </div>
                             <div>
@@ -117,32 +220,27 @@ const HomePage: React.FC = () => {
                             </div>
                         )}
 
-                        {/* ← ЗОБРАЖЕННЯ: nftImage — поле яке зберігається в posts */}
                         <div className="nft-content">
                             <div className="nft-image">
                                 <img
                                     src={post.nftImage || '/img/default-nft.png'}
                                     alt={post.title}
                                     style={{ width: '100%', borderRadius: '12px', objectFit: 'cover', display: 'block' }}
-                                    onError={e => {
-                                        e.currentTarget.onerror = null;
-                                        e.currentTarget.src = '/img/default-nft.png';
-                                    }}
+                                    onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = '/img/default-nft.png'; }}
                                 />
                             </div>
                             {(post as any).blockchain && (
                                 <div style={{ padding: '6px 0', fontSize: '12px', color: '#888', display: 'flex', gap: '10px' }}>
                                     <span>⛓ {(post as any).blockchain}</span>
-                                    {(post as any).price && (
+                                    {post.price && (
                                         <span style={{ color: '#01ff77', fontWeight: 'bold' }}>
-                                            {(post as any).price} {(post as any).currency || 'ETH'}
+                                            {post.price} {post.currency || 'SOL'}
                                         </span>
                                     )}
                                 </div>
                             )}
                         </div>
 
-                        {/* Дії */}
                         <div className="post-actions">
                             <div className="action-left">
                                 <div className="like-btn" style={{ cursor: 'pointer' }} onClick={() => handleLike(post)}>
@@ -161,20 +259,13 @@ const HomePage: React.FC = () => {
                                 </div>
                             </div>
 
-                            {/* Buy — тільки якщо forSale і не власний пост */}
-                            {(post as any).forSale &&
-                                (post as any).price &&
-                                post.userId !== currentUser?.uid && (
-                                    <button
-                                        className="buy-btn"
-                                        onClick={() => setBuyNft(post)}
-                                    >
-                                        Buy {(post as any).price} {(post as any).currency || 'ETH'}
-                                    </button>
-                                )}
+                            {post.forSale && post.price && post.userId !== currentUser?.uid && (
+                                <button className="buy-btn" onClick={() => setBuyNft(post)}>
+                                    Buy {post.price} {post.currency || 'SOL'}
+                                </button>
+                            )}
                         </div>
 
-                        {/* Коментарі */}
                         {selectedPost === post.id && (
                             <div className="comments-section">
                                 <div className="comment-form">
@@ -189,7 +280,7 @@ const HomePage: React.FC = () => {
                                     <button className="comment-submit" onClick={() => handleAddComment(post)}>Post</button>
                                 </div>
                                 <div className="comment-list">
-                                    {post.comments?.map(comment => (
+                                    {post.comments?.map((comment: any) => (
                                         <div key={comment.id} className="comment-item">
                                             <div className="comment-avatar">
                                                 <img
@@ -212,7 +303,6 @@ const HomePage: React.FC = () => {
                 ))
             )}
 
-            {/* Модалка купівлі */}
             {buyNft && (
                 <BuyModal
                     nft={buyNft}
@@ -222,6 +312,87 @@ const HomePage: React.FC = () => {
             )}
         </div>
     );
+};
+
+const st: any = {
+    drawerOverlay: {
+        position: 'fixed', inset: 0,
+        background: 'rgba(0,0,0,0.45)',
+        zIndex: 3000,
+    },
+    drawer: {
+        position: 'fixed', top: 0, left: 0, bottom: 0,
+        width: '260px',
+        background: 'white',
+        zIndex: 3001,
+        boxShadow: '4px 0 20px rgba(0,0,0,0.15)',
+        display: 'flex', flexDirection: 'column',
+    },
+    drawerHeader: {
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        padding: '20px 16px',
+        borderBottom: '1px solid #f0f0f0',
+        background: 'linear-gradient(135deg,#667eea,#764ba2)',
+    },
+    drawerTitle: { color: 'white', fontWeight: 'bold', fontSize: '18px' },
+    drawerClose:  { background: 'none', border: 'none', color: 'white', fontSize: '18px', cursor: 'pointer' },
+    drawerItem: {
+        display: 'flex', alignItems: 'center',
+        padding: '14px 16px',
+        borderBottom: '1px solid #f5f5f5',
+        cursor: 'pointer',
+        color: '#333',
+    },
+    filterDropdown: {
+        position: 'absolute', right: 0, top: '30px',
+        background: 'white',
+        borderRadius: '12px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.15)',
+        minWidth: '160px',
+        zIndex: 1000,
+        overflow: 'hidden',
+    },
+    filterTitle: {
+        padding: '10px 14px',
+        fontSize: '11px',
+        fontWeight: 'bold',
+        color: '#999',
+        background: '#f8f8f8',
+        textTransform: 'uppercase',
+        letterSpacing: '0.5px',
+    },
+    filterOption: {
+        padding: '10px 14px',
+        cursor: 'pointer',
+        fontSize: '14px',
+        display: 'flex', alignItems: 'center',
+        transition: 'background 0.15s',
+    },
+    filterBadge: {
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        margin: '8px 15px 0',
+        background: '#f0fff4',
+        border: '1px solid #b2f0c8',
+        borderRadius: '20px',
+        padding: '6px 12px',
+        fontSize: '13px',
+        color: '#00aa44',
+    },
+    filterBadgeClear: {
+        background: 'none', border: 'none',
+        color: '#00aa44', cursor: 'pointer',
+        fontSize: '14px', fontWeight: 'bold',
+    },
+    hamburgerBtn: {
+        display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
+        width: '24px', height: '18px',
+        background: 'none', border: 'none',
+        cursor: 'pointer', padding: 0, flexShrink: 0,
+    },
+    hamburgerLine: {
+        display: 'block', width: '100%', height: '2px',
+        background: '#333', borderRadius: '2px',
+    },
 };
 
 export default HomePage;

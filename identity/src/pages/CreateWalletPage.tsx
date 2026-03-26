@@ -1,7 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { doc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
 
 interface StepProps {
     onNext: () => void;
@@ -17,7 +15,6 @@ const CreateWalletPage: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
     const [scrambledWords, setScrambledWords] = useState<string[]>([]);
     const [selectedWords, setSelectedWords] = useState<string[]>([]);
     const [fingerprintEnabled, setFingerprintEnabled] = useState(false);
-    const [loading, setLoading] = useState(false);
 
     // Генерація seed фрази при першому кроці
     useEffect(() => {
@@ -40,36 +37,9 @@ const CreateWalletPage: React.FC<{ onComplete: () => void }> = ({ onComplete }) 
 
     const handleCreateWallet = async () => {
         if (!currentUser) return;
-
-        setLoading(true);
-        try {
-            // Зберігаємо гаманець в Firebase
-            const walletData = {
-                userId: currentUser.uid,
-                address: '0x' + Array.from({ length: 40 }, () =>
-                    Math.floor(Math.random() * 16).toString(16)
-                ).join(''),
-                recoveryPhrase: recoveryPhrase.join(' '),
-                createdAt: new Date().toISOString(),
-                fingerprintEnabled,
-                balance: {
-                    ICP: 0,
-                    POLYGON: 0,
-                    SOLANA: 0
-                },
-                nfts: []
-            };
-
-            await setDoc(doc(db, 'wallets', currentUser.uid), walletData);
-
-            // Переходимо до завершення
-            setStep(5);
-        } catch (error) {
-            console.error('Error creating wallet:', error);
-            alert('Error creating wallet');
-        } finally {
-            setLoading(false);
-        }
+        // Wallet is auto-created by the Rust API during registration.
+        // Nothing to do here — just advance to the success step.
+        setStep(5);
     };
 
     const handleWordSelect = (word: string) => {

@@ -13,15 +13,19 @@ export interface NFT {
     forSale: boolean;
     createdAt: string;
     currency?: string;
+    blockchain?: string;
+    royalty?: number;
+    tags?: string[];
+    category?: string;
     postId?: string;      // ID поста в колекції posts (для оновлення після продажу)
 }
 
 export interface CryptoWallet {
     id: string;
-    type: 'metamask' | 'walletconnect' | 'coinbase' | 'phantom';
+    type: 'phantom';
     address: string;
     chainId: number;
-    network: 'ethereum' | 'polygon' | 'solana' | 'icp';
+    network: 'solana';
     balance: number;
     currency: string;
     isConnected: boolean;

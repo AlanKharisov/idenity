@@ -1,21 +1,24 @@
 export interface NFT {
-    id: number;
+    id: string;
     title: string;
     description: string;
     image: string;
+    nftImage?: string;
     tags?: string[];
-    userId: number;
-    userName?: string;
-    userAvatar?: string;
-    likes: number;
-    liked?: boolean;
-    comments: Comment[];
+    category?: string;
+    blockchain?: string;
+    royalty?: number;
+    ownerId: string;
+    ownerName: string;
+    price?: number | null;
+    forSale: boolean;
+    currency?: string;
     createdAt: string;
 }
 
 export interface Comment {
-    id: number;
-    userId: number;
+    id: string;
+    userId: string;
     userName: string;
     userAvatar: string;
     text: string;
@@ -23,7 +26,7 @@ export interface Comment {
 }
 
 export interface Alert {
-    id: number;
+    id: string;
     title: string;
     text: string;
     createdAt: string;

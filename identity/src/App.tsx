@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './styles/App.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
-import { doc, getDoc } from 'firebase/firestore';
-import { db } from './firebase/config';
-import { NFT } from './firebase/wallet';
+import { apiGetMarkiWallet } from './services/apiClient';
 import SplashScreen        from './pages/SplashScreen';
 import WelcomeScreen       from './pages/WelcomeScreen';
 import AuthScreen          from './pages/AuthScreen';
@@ -26,7 +24,7 @@ function AppContent() {
     const [selectedNFT, setSelectedNFT]           = useState<any>(null);
     const [showCreateWallet, setShowCreateWallet] = useState(false);
     const [checkingWallet, setCheckingWallet]     = useState(false);
-    const [nftToSell, setNftToSell]               = useState<NFT | null>(null);
+    const [nftToSell, setNftToSell]               = useState<any | null>(null);
 
     const { currentUser, loading } = useAuth();
 
@@ -39,11 +37,11 @@ function AppContent() {
             if (!currentUser) { setCheckingWallet(false); return; }
             setCheckingWallet(true);
             try {
-                const walletDoc = await getDoc(doc(db, 'wallets', currentUser.uid));
-                setShowCreateWallet(!walletDoc.exists());
-            } catch (error: any) {
-                if (error.code === 'permission-denied')
-                    alert('⚠️ Firebase permission error. Check your database rules.');
+                await apiGetMarkiWallet();
+                setShowCreateWallet(false);
+            } catch (err: any) {
+                // 404 means no wallet yet
+                setShowCreateWallet(true);
             } finally {
                 setCheckingWallet(false);
             }
@@ -55,13 +53,11 @@ function AppContent() {
     const closeNFTViewer     = () => { setSelectedNFT(null); setCurrentPage('home'); };
     const handleWalletComplete = () => { setShowCreateWallet(false); setCurrentPage('wallet'); };
 
-    // Коли натискають "Sell" у WalletPage → відкриваємо AddNFTPage з цією NFT
-    const handleSellNFT = (nft: NFT) => {
+    const handleSellNFT = (nft: any) => {
         setNftToSell(nft);
         setCurrentPage('add-nft');
     };
 
-    // Навігація: при переході з add-nft скидаємо nftToSell
     const navigateTo = (page: typeof currentPage) => {
         if (page !== 'add-nft') setNftToSell(null);
         setCurrentPage(page);

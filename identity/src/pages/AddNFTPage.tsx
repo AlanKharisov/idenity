@@ -1,58 +1,48 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { addNFTToWallet, updateNFTInWallet, getUserNFTs, NFT } from '../firebase/wallet';
-import { notifyNFTCreated } from '../firebase/notifications';
-import { usePosts } from '../hooks/usePosts';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { storage } from '../firebase/config';
-import { collection, addDoc, query, where, getDocs, deleteDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { apiCreateNFT, apiUpdateNFT, apiGetNFTs, apiCreatePost, apiDeletePost, apiBatchCreate, apiGetPosts } from '../services/apiClient';
+import { useUmi } from '../hooks/useUmi';
+import { generateSigner, percentAmount } from '@metaplex-foundation/umi';
+import { createNft } from '@metaplex-foundation/mpl-token-metadata';
 
-// ─── Константи ───────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES  = ['Art', 'Music', 'Photography', 'Gaming', '3D', 'Collectible', 'Sports', 'Meme'];
-const CURRENCIES  = ['ETH', 'SOL', 'MATIC', 'ICP'];
+const CURRENCIES  = ['SOL', 'UAH', 'USD'];
 const BLOCKCHAINS = [
-    { id: 'ethereum', name: 'Ethereum', icon: '🔷', currency: 'ETH',  fee: '~$5-20'  },
-    { id: 'solana',   name: 'Solana',   icon: '◎',  currency: 'SOL',  fee: '~$0.01'  },
-    { id: 'polygon',  name: 'Polygon',  icon: '🟣', currency: 'MATIC',fee: '~$0.01'  },
-    { id: 'icp',      name: 'ICP',      icon: '∞',  currency: 'ICP',  fee: '~$0.001' },
+    { id: 'solana', name: 'Solana', icon: '◎', currency: 'SOL', fee: '~$0.01' },
 ];
 
 type Step = 1 | 2 | 3;
-type Mode = 'create' | 'wallet';
+type Mode = 'create' | 'wallet' | 'batch';
 
 interface AddNFTPageProps {
-    preselectedNFT?: NFT | null;
+    preselectedNFT?: any | null;
 }
 
 const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
-    const { currentUser }  = useAuth();
-    const { addPost }      = usePosts();
-    const fileInputRef     = useRef<HTMLInputElement>(null);
+    const { currentUser } = useAuth();
+    const { umi, isReady: walletReady } = useUmi();
+    const fileInputRef    = useRef<HTMLInputElement>(null);
+    const batchInputRef   = useRef<HTMLInputElement>(null);
 
-    // ── Режим ────────────────────────────────────────────────────────────────
+    // ── Mode ──────────────────────────────────────────────────────────────────
     const [mode, setMode] = useState<Mode>(preselectedNFT ? 'wallet' : 'create');
-    const activeMode      = mode as string; // уникає TypeScript narrowing
 
-    // ── Wallet mode: список NFT ───────────────────────────────────────────────
-    const [walletNFTs, setWalletNFTs]       = useState<NFT[]>([]);
-    const [walletLoading, setWalletLoading] = useState(false);
+    // ── Wallet mode ───────────────────────────────────────────────────────────
+    const [walletNFTs, setWalletNFTs]               = useState<any[]>([]);
+    const [walletLoading, setWalletLoading]         = useState(false);
+    const [selectedWalletNFT, setSelectedWalletNFT] = useState<any | null>(preselectedNFT || null);
+    const [editTitle, setEditTitle]                 = useState('');
+    const [editDescription, setEditDescription]     = useState('');
+    const [editTags, setEditTags]                   = useState<string[]>([]);
+    const [editTagInput, setEditTagInput]           = useState('');
+    const [editCategory, setEditCategory]           = useState('Art');
+    const [sellPrice, setSellPrice]                 = useState('');
+    const [sellCurrency, setSellCurrency]           = useState('SOL');
+    const [selling, setSelling]                     = useState(false);
+    const [sellSuccess, setSellSuccess]             = useState(false);
 
-    // ── Wallet mode: вибрана NFT + форма редагування ─────────────────────────
-    const [selectedWalletNFT, setSelectedWalletNFT] = useState<NFT | null>(preselectedNFT || null);
-
-    // Поля форми — заповнюємо з вибраної NFT або порожні
-    const [editTitle, setEditTitle]           = useState('');
-    const [editDescription, setEditDescription] = useState('');
-    const [editTags, setEditTags]             = useState<string[]>([]);
-    const [editTagInput, setEditTagInput]     = useState('');
-    const [editCategory, setEditCategory]     = useState('Art');
-    const [sellPrice, setSellPrice]           = useState('');
-    const [sellCurrency, setSellCurrency]     = useState('ETH');
-    const [selling, setSelling]               = useState(false);
-    const [sellSuccess, setSellSuccess]       = useState(false);
-
-    // ── Create mode ──────────────────────────────────────────────────────────
+    // ── Create mode ───────────────────────────────────────────────────────────
     const [step, setStep]                     = useState<Step>(1);
     const [loading, setLoading]               = useState(false);
     const [uploadProgress, setUploadProgress] = useState('');
@@ -67,38 +57,54 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
     const [category, setCategory]             = useState('Art');
     const [forSale, setForSale]               = useState(false);
     const [price, setPrice]                   = useState('');
-    const [currency, setCurrency]             = useState('ETH');
-    const [blockchain, setBlockchain]         = useState('ethereum');
+    const [currency, setCurrency]             = useState('SOL');
+    const [blockchain, setBlockchain]         = useState('solana');
     const [royalty, setRoyalty]               = useState('10');
+    // Collection creation
+    const [isCollection, setIsCollection]     = useState(false);
+    const [collectionName, setCollectionName] = useState('');
+    const [collectionFiles, setCollectionFiles] = useState<File[]>([]);
 
-    // ── Завантаження NFT з гаманця ───────────────────────────────────────────
+    // ── Batch mode ────────────────────────────────────────────────────────────
+    const [batchFiles, setBatchFiles]         = useState<File[]>([]);
+    const [batchBlockchain, setBatchBlockchain] = useState('solana');
+    const [batchCurrency, setBatchCurrency]   = useState('SOL');
+    const [batchRoyalty, setBatchRoyalty]     = useState('10');
+    const [batchForSale, setBatchForSale]     = useState(false);
+    const [batchPrice, setBatchPrice]         = useState('');
+    const [batchTags, setBatchTags]           = useState<string[]>([]);
+    const [batchTagInput, setBatchTagInput]   = useState('');
+    const [batchLoading, setBatchLoading]     = useState(false);
+    const [batchResult, setBatchResult]       = useState<any | null>(null);
+
+    // ── Load wallet NFTs ──────────────────────────────────────────────────────
     useEffect(() => {
-        if (activeMode === 'wallet' && !preselectedNFT && !selectedWalletNFT) {
+        if (mode === 'wallet' && !preselectedNFT && !selectedWalletNFT) {
             setWalletLoading(true);
-            getUserNFTs(currentUser!.uid).then(nfts => {
-                setWalletNFTs(nfts.filter(n => !n.forSale));
-                setWalletLoading(false);
-            });
+            apiGetNFTs()
+                .then(nfts => setWalletNFTs((nfts || []).filter((n: any) => !n.forSale)))
+                .catch(() => setWalletNFTs([]))
+                .finally(() => setWalletLoading(false));
         }
-    }, [activeMode, currentUser]); // eslint-disable-line react-hooks/exhaustive-deps
+    }, [mode]); // eslint-disable-line
 
-    // ── Коли вибирають NFT — заповнюємо форму ────────────────────────────────
+    // ── Fill form from selected NFT ───────────────────────────────────────────
     useEffect(() => {
         if (selectedWalletNFT) {
             setEditTitle(selectedWalletNFT.title || '');
             setEditDescription(selectedWalletNFT.description || '');
-            setEditTags((selectedWalletNFT as any).tags || []);
-            setEditCategory((selectedWalletNFT as any).category || 'Art');
-            setSellCurrency((selectedWalletNFT as any).currency || 'ETH');
+            setEditTags(selectedWalletNFT.tags || []);
+            setEditCategory(selectedWalletNFT.category || 'Art');
+            setSellCurrency(selectedWalletNFT.currency || 'SOL');
         }
     }, [selectedWalletNFT]);
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
     const getNFTImage = (nft: any) => nft.image || nft.nftImage || '/img/default-nft.png';
 
     const processFile = (file: File) => {
         if (!file.type.startsWith('image/')) { alert('Please upload an image file'); return; }
-        if (file.size > 10 * 1024 * 1024)   { alert('File too large. Max 10MB.');    return; }
+        if (file.size > 10 * 1024 * 1024)   { alert('File too large. Max 10MB.'); return; }
         setSelectedFile(file);
         setPreviewUrl(URL.createObjectURL(file));
     };
@@ -107,78 +113,111 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
         e.preventDefault(); setDragOver(false);
         const file = e.dataTransfer.files[0];
         if (file) processFile(file);
-    }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    }, []); // eslint-disable-line
 
     const addTag = (input: string, list: string[], setList: (t: string[]) => void, setInput: (s: string) => void) => {
         const t = input.trim().replace(/^#/, '');
         if (t && !list.includes(t) && list.length < 8) { setList([...list, t]); setInput(''); }
     };
 
-    const uploadImageToStorage = async (file: File): Promise<string> => {
-        const ext = file.name.split('.').pop() || 'jpg';
-        const sRef = ref(storage, `nfts/${currentUser!.uid}/${Date.now()}.${ext}`);
-        setUploadProgress('Uploading image...');
-        await uploadBytes(sRef, file);
-        setUploadProgress('Getting URL...');
-        const url = await getDownloadURL(sRef);
-        setUploadProgress('');
-        return url;
-    };
-
     const canGoNext = () => {
-        if (step === 1) return !!selectedFile && !!title.trim() && !!description.trim();
+        if (step === 1) {
+            const hasFile = isCollection ? collectionFiles.length > 0 : !!selectedFile;
+            return hasFile && !!title.trim() && !!description.trim();
+        }
         if (step === 2) return !!blockchain;
         return true;
     };
 
-    // ── SUBMIT: створення нової NFT ──────────────────────────────────────────
+    // ── Create submit ────────────────────────────────────────────────────────
     const handleCreateSubmit = async () => {
-        if (!currentUser || !selectedFile) return;
+        if (!currentUser) return;
+
+        // Pre-mint guard: Phantom must be connected before we can sign a Solana tx.
+        if (!walletReady) {
+            alert('Please connect your Phantom wallet first to mint on-chain.');
+            return;
+        }
+
         setLoading(true);
         try {
-            const imageUrl      = await uploadImageToStorage(selectedFile);
-            const selectedChain = BLOCKCHAINS.find(b => b.id === blockchain);
-            const nftCurrency   = selectedChain?.currency || currency;
-            const nftPrice      = forSale && price ? parseFloat(price) : null;
-
-            const nft: any = {
-                id:          `nft_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-                title:       title.trim(),
-                description: description.trim(),
-                image:       imageUrl,
-                tags,
-                category,
-                blockchain,
-                royalty:     parseInt(royalty),
-                ownerId:     currentUser.uid,
-                ownerName:   currentUser.name || 'Unknown',
-                price:       nftPrice,
-                forSale,
-                createdAt:   new Date().toISOString(),
-                currency:    nftCurrency,
-            };
-
-            await addNFTToWallet(currentUser.uid, nft);
-            await addPost({
-                image: imageUrl, title: title.trim(), description: description.trim(),
-                tags, category, blockchain, royalty: parseInt(royalty),
-                price: nftPrice, forSale, currency: nftCurrency,
-            });
-            await notifyNFTCreated(currentUser.uid, title.trim());
-            setSuccess(true);
-        } catch (error: any) {
-            if (error.code === 'storage/unauthorized') {
-                alert('❌ Firebase Storage permission denied. Check Storage Rules.');
+            if (isCollection) {
+                // ── Collection / batch mode (off-chain only, no Umi mint) ──────────
+                if (collectionFiles.length === 0) { alert('Please select images for your collection'); return; }
+                setUploadProgress('Uploading collection...');
+                const items = collectionFiles.map((f, i) => ({
+                    title:       f.name.replace(/\.[^.]+$/, '') || `${collectionName.trim() || 'Collection'} #${i + 1}`,
+                    description: description.trim(),
+                    ...(forSale && price ? { price: parseFloat(price) } : {}),
+                }));
+                const form = new FormData();
+                collectionFiles.forEach(f => form.append('images[]', f));
+                form.append('metadata', JSON.stringify({
+                    blockchain, currency,
+                    royalty: parseFloat(royalty),
+                    forSale, tags, items,
+                }));
+                const collectionResult = await apiBatchCreate(form);
+                if (collectionResult?.failed > 0) {
+                    console.warn('[AddNFT] Collection batch failures:', collectionResult);
+                }
             } else {
-                alert(`❌ Error: ${error.message}`);
+                // ── Single NFT — three-step on-chain mint ─────────────────────────
+                if (!selectedFile) { alert('Please select an image'); return; }
+
+                // Step 1 — Upload image + metadata JSON to backend / Firebase Storage.
+                // Backend returns the NFT record including the off-chain metadataUri.
+                setUploadProgress('Step 1/3 — Uploading image & metadata…');
+                const metadata: any = {
+                    title:       title.trim(),
+                    description: description.trim(),
+                    tags,
+                    category,
+                    blockchain,
+                    royalty:     parseFloat(royalty),
+                    forSale,
+                    currency,
+                };
+                if (forSale && price) metadata.price = parseFloat(price);
+                const form = new FormData();
+                form.append('image',    selectedFile);
+                form.append('metadata', JSON.stringify(metadata));
+                const result = await apiCreateNFT(form);
+
+                const nftId       = result?.id;
+                const metadataUri = result?.metadataUri;
+                if (!nftId || !metadataUri) {
+                    throw new Error('Backend did not return id / metadataUri — check Rust handler.');
+                }
+
+                // Step 2 — Mint on Solana Devnet via Umi.
+                setUploadProgress('Step 2/3 — Minting on Solana Devnet (approve in Phantom)…');
+                const mint = generateSigner(umi);
+                await createNft(umi, {
+                    mint,
+                    name:                 title.trim(),
+                    uri:                  metadataUri,
+                    sellerFeeBasisPoints: percentAmount(parseFloat(royalty)),
+                }).sendAndConfirm(umi);
+
+                const mintAddress = mint.publicKey; // PublicKey is a base-58 string in Umi v1
+
+                // Step 3 — Persist the on-chain mint address back to Firestore.
+                setUploadProgress('Step 3/3 — Recording on-chain identity…');
+                await apiUpdateNFT(nftId, { mintAddress });
             }
+            setUploadProgress('');
+            setSuccess(true);
+        } catch (err: any) {
+            console.error('[AddNFT] create error:', err);
+            alert(`❌ Error: ${err.message}`);
         } finally {
             setLoading(false);
             setUploadProgress('');
         }
     };
 
-    // ── SUBMIT: перепродаж NFT з гаманця ─────────────────────────────────────
+    // ── Sell from wallet submit ───────────────────────────────────────────────
     const handleSellFromWallet = async () => {
         if (!currentUser || !selectedWalletNFT || !sellPrice || !editTitle.trim()) return;
         const numPrice = parseFloat(sellPrice);
@@ -186,50 +225,32 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
 
         setSelling(true);
         try {
-            // 1. Оновлюємо NFT у гаманці з новими даними (назва, опис, теги)
-            const updatedNFT: NFT = {
-                ...selectedWalletNFT,
-                title:       editTitle.trim(),
-                description: editDescription.trim(),
-                price:       numPrice,
-                forSale:     true,
-                currency:    sellCurrency,
-            };
-            // Зберігаємо теги і категорію
-            (updatedNFT as any).tags     = editTags;
-            (updatedNFT as any).category = editCategory;
-
-            await updateNFTInWallet(currentUser.uid, updatedNFT);
-
-            // 2. Видаляємо старий пост якщо був
-            const oldQ = query(
-                collection(db, 'posts'),
-                where('walletNftId', '==', selectedWalletNFT.id),
-                where('userId', '==', currentUser.uid)
-            );
-            const oldSnap = await getDocs(oldQ);
-            for (const d of oldSnap.docs) await deleteDoc(d.ref);
-
-            // 3. Публікуємо новий пост з оновленими даними
-            await addDoc(collection(db, 'posts'), {
-                userId:      currentUser.uid,
-                userName:    currentUser.name,
-                userAvatar:  currentUser.avatar || '/img/default-avatar.png',
-                nftImage:    getNFTImage(selectedWalletNFT),
+            await apiUpdateNFT(selectedWalletNFT.id, {
                 title:       editTitle.trim(),
                 description: editDescription.trim(),
                 tags:        editTags,
                 category:    editCategory,
                 price:       numPrice,
-                currency:    sellCurrency,
                 forSale:     true,
-                ownerId:     currentUser.uid,
-                ownerName:   currentUser.name,
+                currency:    sellCurrency,
+            });
+
+            // Delete old post for this NFT, then create new one
+            try {
+                const posts = await apiGetPosts();
+                const oldPost = posts.find((p: any) => p.walletNftId === selectedWalletNFT.id && p.userId === currentUser.uid);
+                if (oldPost?.id) await apiDeletePost(oldPost.id).catch(() => null);
+            } catch { /* non-critical */ }
+
+            await apiCreatePost({
+                nftImage:    getNFTImage(selectedWalletNFT),
+                title:       editTitle.trim(),
+                description: editDescription.trim(),
+                tags:        editTags,
+                forSale:     true,
+                price:       numPrice,
+                currency:    sellCurrency,
                 walletNftId: selectedWalletNFT.id,
-                likes:       0,
-                likedBy:     [],
-                comments:    [],
-                createdAt:   new Date().toISOString(),
             });
 
             setSellSuccess(true);
@@ -240,33 +261,227 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
         }
     };
 
+    // ── Batch submit ─────────────────────────────────────────────────────────
+    const handleBatchSubmit = async () => {
+        if (!currentUser || batchFiles.length === 0) { alert('Please select files'); return; }
+        setBatchLoading(true);
+        try {
+            const items = batchFiles.map((f, i) => ({
+                title:       f.name.replace(/\.[^.]+$/, '') || `Batch NFT #${i + 1}`,
+                description: `Batch upload item ${i + 1}`,
+                price:       batchForSale && batchPrice ? parseFloat(batchPrice) : undefined,
+            }));
+            const metadata = {
+                blockchain: batchBlockchain,
+                currency:   batchCurrency,
+                royalty:    parseFloat(batchRoyalty),
+                forSale:    batchForSale,
+                tags:       batchTags,
+                items,
+            };
+            const form = new FormData();
+            batchFiles.forEach(f => form.append('images[]', f));
+            form.append('metadata', JSON.stringify(metadata));
+
+            const result = await apiBatchCreate(form);
+            if (result?.failed > 0) {
+                console.warn('[AddNFT] Batch failures:', result);
+            }
+            setBatchResult(result);
+        } catch (err: any) {
+            console.error('[AddNFT] batch error:', err);
+            alert(`❌ Batch error: ${err.message}`);
+        } finally {
+            setBatchLoading(false);
+        }
+    };
+
     const handleReset = () => {
         setStep(1); setSelectedFile(null); setPreviewUrl(''); setTitle('');
         setDescription(''); setTags([]); setTagInput(''); setCategory('Art');
-        setForSale(false); setPrice(''); setCurrency('ETH');
-        setBlockchain('ethereum'); setRoyalty('10'); setSuccess(false);
+        setForSale(false); setPrice(''); setCurrency('SOL');
+        setBlockchain('solana'); setRoyalty('10'); setSuccess(false);
+        setIsCollection(false); setCollectionName(''); setCollectionFiles([]);
     };
 
-    // ── Перемикач режиму (таби) ──────────────────────────────────────────────
+    // ── Mode tabs (3 buttons) ─────────────────────────────────────────────────
     const ModeTabs = () => (
         <div style={s.modeTabs}>
             <button
-                style={{ ...s.modeTab, background: activeMode === 'create' ? '#01ff77' : '#f0f0f0', color: activeMode === 'create' ? 'black' : '#666' }}
+                style={{ ...s.modeTab, background: mode === 'create' ? '#01ff77' : '#f0f0f0', color: mode === 'create' ? 'black' : '#666' }}
                 onClick={() => { setMode('create'); setSelectedWalletNFT(null); }}
             >🎨 Create New</button>
             <button
-                style={{ ...s.modeTab, background: activeMode === 'wallet' ? '#01ff77' : '#f0f0f0', color: activeMode === 'wallet' ? 'black' : '#666' }}
+                style={{ ...s.modeTab, background: mode === 'wallet' ? '#01ff77' : '#f0f0f0', color: mode === 'wallet' ? 'black' : '#666' }}
                 onClick={() => setMode('wallet')}
-            >💼 Sell from Wallet</button>
+            >💼 Sell</button>
+            <button
+                style={{ ...s.modeTab, background: mode === 'batch' ? '#01ff77' : '#f0f0f0', color: mode === 'batch' ? 'black' : '#666', position: 'relative' }}
+                onClick={() => setMode('batch')}
+            >
+                📦 Batch
+                <span style={{ position: 'absolute', top: '-6px', right: '-2px', background: '#ff6b35', color: 'white', fontSize: '9px', padding: '1px 5px', borderRadius: '8px', fontWeight: 'bold' }}>BIZ</span>
+            </button>
         </div>
     );
 
     // ══════════════════════════════════════════════════════════════════════════
-    // РЕЖИМ: ПРОДАЖ З ГАМАНЦЯ
+    // BATCH UPLOAD MODE
     // ══════════════════════════════════════════════════════════════════════════
-    if (activeMode === 'wallet') {
+    if (mode === 'batch') {
+        if (batchResult) {
+            return (
+                <div className="page active" style={s.page}>
+                    <ModeTabs />
+                    <div style={s.successBox}>
+                        <div style={s.successCircle}>📦</div>
+                        <h2 style={s.successTitle}>Batch Upload Complete!</h2>
+                        <p style={s.successText}>
+                            ✅ Created: <strong>{batchResult.created}</strong> &nbsp;
+                            {batchResult.failed > 0 && <>❌ Failed: <strong>{batchResult.failed}</strong></>}
+                        </p>
+                        {batchResult.failed > 0 && batchResult.results?.filter((r: any) => r.status === 'error').map((r: any) => (
+                            <div key={r.index} style={{ background: '#fff5f5', border: '1px solid #ffc0c0', borderRadius: '8px', padding: '8px 12px', marginBottom: '6px', fontSize: '12px', color: '#cc2222', textAlign: 'left', width: '100%' }}>
+                                Item #{r.index + 1}: {r.message || 'Unknown error'}
+                            </div>
+                        ))}
+                        <button style={s.primaryBtn} onClick={() => { setBatchResult(null); setBatchFiles([]); }}>
+                            Upload Another Batch
+                        </button>
+                    </div>
+                </div>
+            );
+        }
 
-        // Успіх
+        return (
+            <div className="page active" style={s.page}>
+                <style>{`@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}`}</style>
+                <ModeTabs />
+                <div style={{ ...s.stepContent, marginTop: '16px' }}>
+                    <h2 style={s.stepTitle}>📦 Batch Upload</h2>
+                    <p style={s.stepSub}>Upload multiple NFTs at once — designed for company use</p>
+
+                    {/* Company notice */}
+                    <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '10px', padding: '12px 14px', marginBottom: '20px', fontSize: '13px', color: '#856404' }}>
+                        ⚠️ <strong>Note:</strong> Publishing each NFT in the batch will incur a <strong>1% platform fee</strong> on sales.
+                    </div>
+
+                    {/* File picker */}
+                    <div style={s.field}>
+                        <label style={s.fieldLabel}>Select Images *</label>
+                        <input
+                            ref={batchInputRef}
+                            type="file" accept="image/*" multiple style={{ display: 'none' }}
+                            onChange={e => {
+                                const files = Array.from(e.target.files || []);
+                                setBatchFiles(files);
+                            }}
+                        />
+                        <button style={{ width: '100%', padding: '14px', background: '#f0f0f0', border: '2px dashed #01ff77', borderRadius: '10px', cursor: 'pointer', fontSize: '14px', color: '#444' }}
+                                onClick={() => batchInputRef.current?.click()}>
+                            📁 {batchFiles.length > 0 ? `${batchFiles.length} file(s) selected` : 'Click to select multiple images'}
+                        </button>
+                        {batchFiles.length > 0 && (
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '10px' }}>
+                                {batchFiles.slice(0, 8).map((f, i) => (
+                                    <div key={i} style={{ background: '#f0fff4', border: '1px solid #b2f0c8', borderRadius: '6px', padding: '4px 8px', fontSize: '11px', color: '#00aa44' }}>
+                                        {f.name.slice(0, 15)}{f.name.length > 15 ? '...' : ''}
+                                    </div>
+                                ))}
+                                {batchFiles.length > 8 && <div style={{ fontSize: '11px', color: '#888', padding: '4px' }}>+{batchFiles.length - 8} more</div>}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Blockchain */}
+                    <div style={s.field}>
+                        <label style={s.fieldLabel}>Blockchain</label>
+                        <div style={s.chipRow}>
+                            {BLOCKCHAINS.map(b => (
+                                <button key={b.id} style={{ ...s.chip, background: batchBlockchain === b.id ? '#01ff77' : '#f0f0f0', color: batchBlockchain === b.id ? 'black' : '#555', fontWeight: batchBlockchain === b.id ? 'bold' : 'normal' }}
+                                        onClick={() => { setBatchBlockchain(b.id); setBatchCurrency(b.currency); }}>
+                                    {b.icon} {b.name}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Currency */}
+                    <div style={s.field}>
+                        <label style={s.fieldLabel}>Currency</label>
+                        <div style={s.chipRow}>
+                            {CURRENCIES.map(c => (
+                                <button key={c} style={{ ...s.chip, background: batchCurrency === c ? '#01ff77' : '#f0f0f0', color: batchCurrency === c ? 'black' : '#555' }}
+                                        onClick={() => setBatchCurrency(c)}>{c}</button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Royalty */}
+                    <div style={s.field}>
+                        <label style={s.fieldLabel}>Royalty: <strong style={{ color: '#01ff77' }}>{batchRoyalty}%</strong></label>
+                        <input type="range" min="0" max="30" step="1" value={batchRoyalty}
+                               onChange={e => setBatchRoyalty(e.target.value)} style={s.slider} />
+                    </div>
+
+                    {/* Tags */}
+                    <div style={s.field}>
+                        <label style={s.fieldLabel}>Tags (applied to all)</label>
+                        <div style={s.tagInputRow}>
+                            <input style={{ ...s.input, flex: 1, margin: 0 }} placeholder="#tag" value={batchTagInput}
+                                   onChange={e => setBatchTagInput(e.target.value)}
+                                   onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addTag(batchTagInput, batchTags, setBatchTags, setBatchTagInput); }}} />
+                            <button style={s.addTagBtn} onClick={() => addTag(batchTagInput, batchTags, setBatchTags, setBatchTagInput)}>Add</button>
+                        </div>
+                        {batchTags.length > 0 && (
+                            <div style={s.tagsRow}>
+                                {batchTags.map(tag => (
+                                    <span key={tag} style={s.tagBadge}>
+                                        #{tag}
+                                        <button style={s.tagRemove} onClick={() => setBatchTags(batchTags.filter(t => t !== tag))}>✕</button>
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* For sale toggle */}
+                    <div style={s.toggleRow}>
+                        <div>
+                            <div style={{ fontWeight: 'bold', color: '#222' }}>List all for Sale</div>
+                            <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>Set a price for all NFTs in batch</div>
+                        </div>
+                        <div style={{ ...s.toggle, background: batchForSale ? '#01ff77' : '#ccc' }} onClick={() => setBatchForSale(!batchForSale)}>
+                            <div style={{ ...s.toggleThumb, left: batchForSale ? '26px' : '4px' }} />
+                        </div>
+                    </div>
+                    {batchForSale && (
+                        <div style={s.field}>
+                            <label style={s.fieldLabel}>Price per NFT ({batchCurrency})</label>
+                            <input type="number" style={s.input} placeholder="0.00" min="0" step="0.001"
+                                   value={batchPrice} onChange={e => setBatchPrice(e.target.value)} />
+                        </div>
+                    )}
+
+                    <button
+                        style={{ ...s.nextBtn, width: '100%', opacity: (batchFiles.length === 0 || batchLoading) ? 0.5 : 1 }}
+                        onClick={handleBatchSubmit}
+                        disabled={batchFiles.length === 0 || batchLoading}
+                    >
+                        {batchLoading
+                            ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><span style={s.btnSpinner} /> Uploading {batchFiles.length} files...</span>
+                            : `🚀 Upload ${batchFiles.length || 0} NFTs`
+                        }
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // WALLET SELL MODE
+    // ══════════════════════════════════════════════════════════════════════════
+    if (mode === 'wallet') {
         if (sellSuccess) {
             return (
                 <div className="page active" style={s.page}>
@@ -274,28 +489,20 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                         <div style={s.successCircle}>💰</div>
                         <h2 style={s.successTitle}>NFT Listed!</h2>
                         <p style={s.successText}>
-                            <strong>"{editTitle}"</strong> listed for{' '}
-                            <strong>{sellPrice} {sellCurrency}</strong>
+                            <strong>"{editTitle}"</strong> listed for <strong>{sellPrice} {sellCurrency}</strong>
                         </p>
                         {selectedWalletNFT && (
-                            <img src={getNFTImage(selectedWalletNFT)} alt={editTitle}
-                                 style={s.successPreview}
+                            <img src={getNFTImage(selectedWalletNFT)} alt={editTitle} style={s.successPreview}
                                  onError={e => { e.currentTarget.src = '/img/default-nft.png'; }} />
                         )}
-                        <button style={s.primaryBtn} onClick={() => {
-                            setSellSuccess(false); setSelectedWalletNFT(null);
-                            setSellPrice(''); setMode('create');
-                        }}>+ Create New NFT</button>
+                        <button style={s.primaryBtn} onClick={() => { setSellSuccess(false); setSelectedWalletNFT(null); setSellPrice(''); setMode('create'); }}>+ Create New NFT</button>
                         <button style={{ ...s.primaryBtn, background: '#f0f0f0', marginTop: '10px', color: '#333' }}
                                 onClick={() => {
                                     setSellSuccess(false); setSelectedWalletNFT(null);
                                     setSellPrice(''); setEditTitle(''); setEditDescription(''); setEditTags([]);
                                     setWalletLoading(true);
-                                    getUserNFTs(currentUser!.uid).then(nfts => {
-                                        setWalletNFTs(nfts.filter(n => !n.forSale));
-                                        setWalletLoading(false);
-                                    });
-                                }}>Sell Another NFT</button>
+                                    apiGetNFTs().then(nfts => { setWalletNFTs((nfts || []).filter((n: any) => !n.forSale)); setWalletLoading(false); });
+                                }}>Sell Another</button>
                     </div>
                 </div>
             );
@@ -306,12 +513,10 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 <style>{`@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}`}</style>
                 <ModeTabs />
 
-                {/* ── КРОК 1: вибір NFT з сітки ── */}
                 {!selectedWalletNFT ? (
                     <div style={{ ...s.stepContent, marginTop: '16px' }}>
                         <h2 style={s.stepTitle}>Sell from Wallet</h2>
                         <p style={s.stepSub}>Choose an NFT from your collection</p>
-
                         {walletLoading ? (
                             <div style={{ textAlign: 'center', padding: '40px' }}>
                                 <div style={s.miniSpinner} />
@@ -321,20 +526,13 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                             <div style={s.emptyWallet}>
                                 <div style={{ fontSize: '44px', marginBottom: '12px' }}>🖼</div>
                                 <strong>No NFTs available to sell</strong>
-                                <p style={{ fontSize: '13px', color: '#888', marginTop: '6px' }}>
-                                    All your NFTs are already listed, or you don't have any yet.
-                                </p>
-                                <button style={s.primaryBtn} onClick={() => setMode('create')}>
-                                    Create New NFT
-                                </button>
+                                <button style={{ ...s.primaryBtn, marginTop: '14px' }} onClick={() => setMode('create')}>Create New NFT</button>
                             </div>
                         ) : (
                             <div style={s.nftPickGrid}>
-                                {walletNFTs.map(nft => (
-                                    <div key={nft.id} style={s.nftPickCard}
-                                         onClick={() => setSelectedWalletNFT(nft)}>
-                                        <img src={getNFTImage(nft)} alt={nft.title}
-                                             style={s.nftPickImg}
+                                {walletNFTs.map((nft: any) => (
+                                    <div key={nft.id} style={s.nftPickCard} onClick={() => setSelectedWalletNFT(nft)}>
+                                        <img src={getNFTImage(nft)} alt={nft.title} style={s.nftPickImg}
                                              onError={e => { e.currentTarget.src = '/img/default-nft.png'; }} />
                                         <div style={s.nftPickOverlay}>
                                             <div style={s.nftPickTitle}>{nft.title}</div>
@@ -346,115 +544,87 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                         )}
                     </div>
                 ) : (
-                    /* ── КРОК 2: повна форма редагування ── */
                     <div style={{ ...s.stepContent, marginTop: '16px' }}>
                         <h2 style={s.stepTitle}>Edit & List for Sale</h2>
-                        <p style={s.stepSub}>Edit details before listing</p>
+                        <p style={s.stepSub}>Set price and details before listing</p>
 
-                        {/* Прев'ю + кнопка зміни */}
+                        {/* Fee notice */}
+                        <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '10px', padding: '10px 14px', marginBottom: '16px', fontSize: '12px', color: '#856404' }}>
+                            💡 Listing is free. A <strong>1% platform fee</strong> is applied when your NFT sells.
+                        </div>
+
                         <div style={s.sellPreviewRow}>
-                            <img src={getNFTImage(selectedWalletNFT)} alt={selectedWalletNFT.title}
-                                 style={s.sellPreviewImg}
+                            <img src={getNFTImage(selectedWalletNFT)} alt={selectedWalletNFT.title} style={s.sellPreviewImg}
                                  onError={e => { e.currentTarget.src = '/img/default-nft.png'; }} />
                             <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: '12px', color: '#888', marginBottom: '4px' }}>Selected NFT</div>
+                                <div style={{ fontSize: '12px', color: '#888' }}>Selected NFT</div>
                                 <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{selectedWalletNFT.title}</div>
                             </div>
                             <button style={s.changeBtn} onClick={() => setSelectedWalletNFT(null)}>✕ Change</button>
                         </div>
 
-                        {/* Назва */}
+                        {/* Title */}
                         <div style={s.field}>
                             <label style={s.fieldLabel}>Title</label>
-                            <input style={s.input} placeholder="NFT title"
-                                   value={editTitle} maxLength={60}
-                                   onChange={e => setEditTitle(e.target.value)} />
+                            <input style={s.input} value={editTitle} maxLength={60} onChange={e => setEditTitle(e.target.value)} />
                             <span style={s.charCount}>{editTitle.length}/60</span>
                         </div>
 
-                        {/* Опис */}
+                        {/* Description */}
                         <div style={s.field}>
                             <label style={s.fieldLabel}>Description</label>
-                            <textarea
-                                style={{ ...s.input, height: '80px', resize: 'none' } as any}
-                                placeholder="Describe your NFT..."
-                                value={editDescription} maxLength={300}
-                                onChange={e => setEditDescription(e.target.value)} />
+                            <textarea style={{ ...s.input, height: '80px', resize: 'none' } as any}
+                                      value={editDescription} maxLength={300} onChange={e => setEditDescription(e.target.value)} />
                             <span style={s.charCount}>{editDescription.length}/300</span>
                         </div>
 
-                        {/* Категорія */}
+                        {/* Category */}
                         <div style={s.field}>
                             <label style={s.fieldLabel}>Category</label>
                             <div style={s.chipRow}>
                                 {CATEGORIES.map(cat => (
-                                    <button key={cat} style={{
-                                        ...s.chip,
-                                        background: editCategory === cat ? '#01ff77' : '#f0f0f0',
-                                        color:      editCategory === cat ? 'black'   : '#555',
-                                        fontWeight: editCategory === cat ? 'bold'    : 'normal',
-                                    }} onClick={() => setEditCategory(cat)}>{cat}</button>
+                                    <button key={cat} style={{ ...s.chip, background: editCategory === cat ? '#01ff77' : '#f0f0f0', color: editCategory === cat ? 'black' : '#555', fontWeight: editCategory === cat ? 'bold' : 'normal' }}
+                                            onClick={() => setEditCategory(cat)}>{cat}</button>
                                 ))}
                             </div>
                         </div>
 
-                        {/* Теги */}
+                        {/* Tags */}
                         <div style={s.field}>
                             <label style={s.fieldLabel}>Tags (up to 8)</label>
                             <div style={s.tagInputRow}>
-                                <input style={{ ...s.input, flex: 1, margin: 0 }}
-                                       placeholder="#tag" value={editTagInput}
+                                <input style={{ ...s.input, flex: 1, margin: 0 }} placeholder="#tag" value={editTagInput}
                                        onChange={e => setEditTagInput(e.target.value)}
-                                       onKeyDown={e => {
-                                           if (e.key === 'Enter' || e.key === ',') {
-                                               e.preventDefault();
-                                               addTag(editTagInput, editTags, setEditTags, setEditTagInput);
-                                           }
-                                       }} />
-                                <button style={s.addTagBtn}
-                                        onClick={() => addTag(editTagInput, editTags, setEditTags, setEditTagInput)}>
-                                    Add
-                                </button>
+                                       onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(editTagInput, editTags, setEditTags, setEditTagInput); }}} />
+                                <button style={s.addTagBtn} onClick={() => addTag(editTagInput, editTags, setEditTags, setEditTagInput)}>Add</button>
                             </div>
                             {editTags.length > 0 && (
                                 <div style={s.tagsRow}>
                                     {editTags.map(tag => (
-                                        <span key={tag} style={s.tagBadge}>
-                                            #{tag}
-                                            <button style={s.tagRemove}
-                                                    onClick={() => setEditTags(editTags.filter(t => t !== tag))}>✕</button>
-                                        </span>
+                                        <span key={tag} style={s.tagBadge}>#{tag}<button style={s.tagRemove} onClick={() => setEditTags(editTags.filter(t => t !== tag))}>✕</button></span>
                                     ))}
                                 </div>
                             )}
                         </div>
 
-                        {/* Розділювач */}
                         <div style={{ borderTop: '1px solid #f0f0f0', margin: '4px 0 18px' }} />
 
-                        {/* Валюта */}
+                        {/* Currency */}
                         <div style={s.field}>
                             <label style={s.fieldLabel}>Currency</label>
-                            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' as any }}>
+                            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' as any }}>
                                 {CURRENCIES.map(c => (
-                                    <button key={c} style={{
-                                        ...s.chip,
-                                        background: sellCurrency === c ? '#01ff77' : '#f0f0f0',
-                                        color:      sellCurrency === c ? 'black'   : '#555',
-                                        fontWeight: sellCurrency === c ? 'bold'    : 'normal',
-                                    }} onClick={() => setSellCurrency(c)}>{c}</button>
+                                    <button key={c} style={{ ...s.chip, background: sellCurrency === c ? '#01ff77' : '#f0f0f0', color: sellCurrency === c ? 'black' : '#555', fontWeight: sellCurrency === c ? 'bold' : 'normal' }}
+                                            onClick={() => setSellCurrency(c)}>{c}</button>
                                 ))}
                             </div>
                         </div>
 
-                        {/* Ціна */}
+                        {/* Price */}
                         <div style={s.field}>
                             <label style={s.fieldLabel}>Listing Price ({sellCurrency})</label>
-                            <input type="number" min="0" step="0.001"
-                                   placeholder="e.g. 0.5"
-                                   value={sellPrice}
-                                   onChange={e => setSellPrice(e.target.value)}
-                                   style={s.input} />
+                            <input type="number" min="0" step="0.001" placeholder="e.g. 0.5"
+                                   value={sellPrice} onChange={e => setSellPrice(e.target.value)} style={s.input} />
                             {sellPrice && !isNaN(parseFloat(sellPrice)) && parseFloat(sellPrice) > 0 && (
                                 <div style={s.priceNote}>
                                     You receive <strong style={{ color: '#01ff77' }}>{parseFloat(sellPrice)} {sellCurrency}</strong> — buyer pays +1% platform fee
@@ -462,12 +632,9 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                             )}
                         </div>
 
-                        {/* Кнопки */}
+                        {/* Buttons */}
                         <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
-                            <button style={s.backBtn}
-                                    onClick={() => setSelectedWalletNFT(null)} disabled={selling}>
-                                ← Back
-                            </button>
+                            <button style={s.backBtn} onClick={() => setSelectedWalletNFT(null)} disabled={selling}>← Back</button>
                             <button
                                 style={{ ...s.nextBtn, flex: 1, opacity: (!sellPrice || !editTitle.trim() || selling) ? 0.5 : 1 }}
                                 onClick={handleSellFromWallet}
@@ -486,20 +653,20 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // РЕЖИМ: СТВОРЕННЯ НОВОЇ NFT
+    // CREATE NEW MODE
     // ══════════════════════════════════════════════════════════════════════════
     if (success) {
         return (
             <div className="page active" style={s.page}>
                 <div style={s.successBox}>
                     <div style={s.successCircle}>🎨</div>
-                    <h2 style={s.successTitle}>NFT Created!</h2>
+                    <h2 style={s.successTitle}>{isCollection ? 'Collection Created!' : 'NFT Created!'}</h2>
                     <p style={s.successText}>
                         <strong>"{title}"</strong> added to your Marki Wallet!
                         {forSale && price && ` Listed for ${price} ${currency}.`}
                     </p>
                     {previewUrl && <img src={previewUrl} alt={title} style={s.successPreview} />}
-                    <button style={s.primaryBtn} onClick={handleReset}>+ Create Another NFT</button>
+                    <button style={s.primaryBtn} onClick={handleReset}>+ Create Another</button>
                 </div>
             </div>
         );
@@ -507,11 +674,22 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
 
     return (
         <div className="page active" style={s.page}>
-            <style>{`@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}`}</style>
+            <style>{`
+                @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+                @media(min-width:600px){
+                    .nft-add-page-inner{max-width:560px;margin:0 auto;}
+                    .nft-chip-row{flex-wrap:nowrap!important;overflow-x:auto;}
+                    .nft-method-tabs{max-width:560px;margin:0 auto 16px;}
+                }
+                @media(max-width:400px){
+                    .nft-step-content{padding:14px!important;}
+                    .nft-chip-row button{font-size:11px!important;padding:5px 10px!important;}
+                }
+            `}</style>
 
             <ModeTabs />
 
-            {/* Прогрес */}
+            {/* Progress */}
             <div style={s.progressWrap}>
                 {([1, 2, 3] as Step[]).map(i => (
                     <React.Fragment key={i}>
@@ -528,41 +706,101 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 <span style={step === 3 ? s.labelActive : s.label}>Price</span>
             </div>
 
-            {/* ─── КРОК 1 ─── */}
+            {/* Step 1 */}
             {step === 1 && (
                 <div style={s.stepContent}>
                     <h2 style={s.stepTitle}>Upload your NFT</h2>
-                    <div
-                        style={{ ...s.dropZone, borderColor: dragOver ? '#01ff77' : previewUrl ? '#01ff77' : '#ddd', background: dragOver ? '#f0fff0' : previewUrl ? '#f9fff9' : 'white' }}
-                        onClick={() => !previewUrl && fileInputRef.current?.click()}
-                        onDragOver={e => { e.preventDefault(); setDragOver(true); }}
-                        onDragLeave={() => setDragOver(false)}
-                        onDrop={handleDrop}
-                    >
-                        {previewUrl ? (
-                            <div style={s.previewWrap}>
-                                <img src={previewUrl} alt="preview" style={s.previewImg} />
-                                <button style={s.removeImgBtn}
-                                        onClick={e => { e.stopPropagation(); setPreviewUrl(''); setSelectedFile(null); }}>
-                                    ✕ Change
-                                </button>
-                            </div>
-                        ) : (
-                            <div style={s.dropContent}>
-                                <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
-                                <p style={{ fontWeight: 'bold', color: '#333', marginBottom: '4px' }}>Drag & drop your file here</p>
-                                <p style={{ color: '#888', fontSize: '13px', marginBottom: '4px' }}>or click to browse</p>
-                                <p style={{ color: '#bbb', fontSize: '11px' }}>JPG, PNG, GIF, WebP · Max 10MB</p>
-                            </div>
-                        )}
+
+                    {/* Collection toggle */}
+                    <div style={{ ...s.toggleRow, marginBottom: '16px' }}>
+                        <div>
+                            <div style={{ fontWeight: 'bold', color: '#222' }}>Create as Collection</div>
+                            <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>Group related NFTs into a collection</div>
+                        </div>
+                        <div style={{ ...s.toggle, background: isCollection ? '#01ff77' : '#ccc' }} onClick={() => setIsCollection(!isCollection)}>
+                            <div style={{ ...s.toggleThumb, left: isCollection ? '26px' : '4px' }} />
+                        </div>
                     </div>
-                    <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-                           onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); }} />
+
+                    {isCollection && (
+                        <div style={s.field}>
+                            <label style={s.fieldLabel}>Collection Name</label>
+                            <input style={s.input} placeholder="e.g. Cosmic Dreams Series"
+                                   value={collectionName} maxLength={60}
+                                   onChange={e => setCollectionName(e.target.value)} />
+                            <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '8px', padding: '8px 12px', marginTop: '8px', fontSize: '12px', color: '#856404' }}>
+                                ⚠️ Publishing this collection will apply a <strong>1% platform fee</strong> on all sales within the collection.
+                            </div>
+                        </div>
+                    )}
+
+                    {isCollection ? (
+                        /* ── Collection multi-file picker ── */
+                        <div>
+                            <div
+                                style={{ ...s.dropZone, borderColor: collectionFiles.length > 0 ? '#01ff77' : '#ddd', background: collectionFiles.length > 0 ? '#f9fff9' : 'white', cursor: 'pointer' }}
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                {collectionFiles.length > 0 ? (
+                                    <div style={{ width: '100%', padding: '12px' }}>
+                                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '10px' }}>
+                                            {collectionFiles.slice(0, 8).map((f, i) => (
+                                                <div key={i} style={{ aspectRatio: '1', borderRadius: '8px', overflow: 'hidden', background: '#f0f0f0' }}>
+                                                    <img src={URL.createObjectURL(f)} alt={f.name} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                                </div>
+                                            ))}
+                                        </div>
+                                        <div style={{ fontSize: '13px', color: '#00aa44', textAlign: 'center' }}>
+                                            {collectionFiles.length} image{collectionFiles.length !== 1 ? 's' : ''} selected — click to change
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div style={s.dropContent}>
+                                        <div style={{ fontSize: '40px', marginBottom: '10px' }}>🖼</div>
+                                        <p style={{ fontWeight: 'bold', color: '#333', marginBottom: '4px' }}>Select multiple images</p>
+                                        <p style={{ color: '#888', fontSize: '13px', marginBottom: '4px' }}>Hold Ctrl / ⌘ to select many at once</p>
+                                        <p style={{ color: '#bbb', fontSize: '11px' }}>JPG, PNG, GIF, WebP · Max 10MB each</p>
+                                    </div>
+                                )}
+                            </div>
+                            <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+                                   onChange={e => {
+                                       const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/') && f.size <= 10 * 1024 * 1024);
+                                       if (files.length > 0) setCollectionFiles(files);
+                                   }} />
+                        </div>
+                    ) : (
+                        /* ── Single-file picker ── */
+                        <div>
+                            <div
+                                style={{ ...s.dropZone, borderColor: dragOver ? '#01ff77' : previewUrl ? '#01ff77' : '#ddd', background: dragOver ? '#f0fff0' : previewUrl ? '#f9fff9' : 'white' }}
+                                onClick={() => !previewUrl && fileInputRef.current?.click()}
+                                onDragOver={e => { e.preventDefault(); setDragOver(true); }}
+                                onDragLeave={() => setDragOver(false)}
+                                onDrop={handleDrop}
+                            >
+                                {previewUrl ? (
+                                    <div style={s.previewWrap}>
+                                        <img src={previewUrl} alt="preview" style={s.previewImg} />
+                                        <button style={s.removeImgBtn} onClick={e => { e.stopPropagation(); setPreviewUrl(''); setSelectedFile(null); }}>✕ Change</button>
+                                    </div>
+                                ) : (
+                                    <div style={s.dropContent}>
+                                        <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
+                                        <p style={{ fontWeight: 'bold', color: '#333', marginBottom: '4px' }}>Drag & drop your file here</p>
+                                        <p style={{ color: '#888', fontSize: '13px', marginBottom: '4px' }}>or click to browse</p>
+                                        <p style={{ color: '#bbb', fontSize: '11px' }}>JPG, PNG, GIF, WebP · Max 10MB</p>
+                                    </div>
+                                )}
+                            </div>
+                            <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }}
+                                   onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); }} />
+                        </div>
+                    )}
 
                     <div style={s.field}>
                         <label style={s.fieldLabel}>NFT Title *</label>
-                        <input style={s.input} placeholder="e.g. Cosmic Dream #1"
-                               value={title} maxLength={60} onChange={e => setTitle(e.target.value)} />
+                        <input style={s.input} placeholder="e.g. Cosmic Dream #1" value={title} maxLength={60} onChange={e => setTitle(e.target.value)} />
                         <span style={s.charCount}>{title.length}/60</span>
                     </div>
                     <div style={s.field}>
@@ -584,18 +822,15 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     <div style={s.field}>
                         <label style={s.fieldLabel}>Tags (up to 8)</label>
                         <div style={s.tagInputRow}>
-                            <input style={{ ...s.input, flex: 1, margin: 0 }} placeholder="#tag"
-                                   value={tagInput} onChange={e => setTagInput(e.target.value)}
-                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(tagInput, tags, setTags, setTagInput); } }} />
+                            <input style={{ ...s.input, flex: 1, margin: 0 }} placeholder="#tag" value={tagInput}
+                                   onChange={e => setTagInput(e.target.value)}
+                                   onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addTag(tagInput, tags, setTags, setTagInput); }}} />
                             <button style={s.addTagBtn} onClick={() => addTag(tagInput, tags, setTags, setTagInput)}>Add</button>
                         </div>
                         {tags.length > 0 && (
                             <div style={s.tagsRow}>
                                 {tags.map(tag => (
-                                    <span key={tag} style={s.tagBadge}>
-                                        #{tag}
-                                        <button style={s.tagRemove} onClick={() => setTags(tags.filter(t => t !== tag))}>✕</button>
-                                    </span>
+                                    <span key={tag} style={s.tagBadge}>#{tag}<button style={s.tagRemove} onClick={() => setTags(tags.filter(t => t !== tag))}>✕</button></span>
                                 ))}
                             </div>
                         )}
@@ -603,7 +838,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 </div>
             )}
 
-            {/* ─── КРОК 2 ─── */}
+            {/* Step 2 */}
             {step === 2 && (
                 <div style={s.stepContent}>
                     <h2 style={s.stepTitle}>Choose Blockchain</h2>
@@ -622,8 +857,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     ))}
                     <div style={s.field}>
                         <label style={s.fieldLabel}>Royalty: <strong style={{ color: '#01ff77' }}>{royalty}%</strong></label>
-                        <input type="range" min="0" max="30" step="1" value={royalty}
-                               onChange={e => setRoyalty(e.target.value)} style={s.slider} />
+                        <input type="range" min="0" max="30" step="1" value={royalty} onChange={e => setRoyalty(e.target.value)} style={s.slider} />
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#bbb' }}>
                             <span>0%</span><span>15%</span><span>30%</span>
                         </div>
@@ -631,7 +865,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 </div>
             )}
 
-            {/* ─── КРОК 3 ─── */}
+            {/* Step 3 */}
             {step === 3 && (
                 <div style={s.stepContent}>
                     <h2 style={s.stepTitle}>Review & Price</h2>
@@ -642,14 +876,13 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                                 <div style={{ fontWeight: 'bold', fontSize: '15px', color: '#222', marginBottom: '4px' }}>{title}</div>
                                 <div style={{ fontSize: '12px', color: '#888', marginBottom: '6px' }}>{description.slice(0, 80)}{description.length > 80 ? '...' : ''}</div>
                                 <div style={{ fontSize: '12px', color: '#555' }}>{BLOCKCHAINS.find(b => b.id === blockchain)?.icon} {blockchain} · Royalty {royalty}%</div>
-                                {tags.length > 0 && (
-                                    <div style={{ display: 'flex', flexWrap: 'wrap' as any, gap: '5px', marginTop: '6px' }}>
-                                        {tags.slice(0, 4).map(t => <span key={t} style={s.reviewTag}>#{t}</span>)}
-                                    </div>
+                                {isCollection && collectionName && (
+                                    <div style={{ fontSize: '12px', color: '#7c5bdc', marginTop: '4px' }}>📚 Collection: {collectionName}</div>
                                 )}
                             </div>
                         </div>
                     )}
+
                     <div style={s.toggleRow}>
                         <div>
                             <div style={{ fontWeight: 'bold', color: '#222' }}>List for Sale</div>
@@ -659,28 +892,39 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                             <div style={{ ...s.toggleThumb, left: forSale ? '26px' : '4px' }} />
                         </div>
                     </div>
+
                     {forSale && (
-                        <div style={s.field}>
-                            <label style={s.fieldLabel}>Price</label>
-                            <div style={{ display: 'flex', gap: '10px' }}>
-                                <input type="number" style={{ ...s.input, flex: 1, margin: 0 }}
-                                       placeholder="0.00" min="0" step="0.001"
-                                       value={price} onChange={e => setPrice(e.target.value)} />
-                                <select style={s.currencySelect} value={currency} onChange={e => setCurrency(e.target.value)}>
-                                    {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
-                                </select>
+                        <>
+                            <div style={s.field}>
+                                <label style={s.fieldLabel}>Price</label>
+                                <div style={{ display: 'flex', gap: '10px' }}>
+                                    <input type="number" style={{ ...s.input, flex: 1, margin: 0 }}
+                                           placeholder="0.00" min="0" step="0.001"
+                                           value={price} onChange={e => setPrice(e.target.value)} />
+                                    <select style={s.currencySelect} value={currency} onChange={e => setCurrency(e.target.value)}>
+                                        {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                                    </select>
+                                </div>
+                                {price && !isNaN(parseFloat(price)) && (
+                                    <div style={s.priceNote}>
+                                        Buyer pays: <strong>{(parseFloat(price) * 1.01).toFixed(4)} {currency}</strong> (includes 1% platform fee)
+                                    </div>
+                                )}
                             </div>
-                            {price && !isNaN(parseFloat(price)) && (
-                                <div style={s.priceNote}>
-                                    Buyer pays: <strong>{(parseFloat(price) * 1.01).toFixed(4)} {currency}</strong> (includes 1% platform fee)
+
+                            {/* Fee notice for collections */}
+                            {isCollection && (
+                                <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: '8px', padding: '8px 12px', marginBottom: '12px', fontSize: '12px', color: '#856404' }}>
+                                    📚 <strong>Collection fee:</strong> Publishing this collection applies a <strong>1% platform fee</strong> on all sales.
                                 </div>
                             )}
-                        </div>
+                        </>
                     )}
+
                 </div>
             )}
 
-            {/* Навігація */}
+            {/* Navigation */}
             <div style={s.navRow}>
                 {step > 1 && (
                     <button style={s.backBtn} onClick={() => setStep((step - 1) as Step)} disabled={loading}>← Back</button>
@@ -691,24 +935,34 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                         Next →
                     </button>
                 ) : (
-                    <button style={{ ...s.nextBtn, flex: 1, opacity: loading ? 0.7 : 1 }}
-                            onClick={handleCreateSubmit} disabled={loading}>
-                        {loading
-                            ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><span style={s.btnSpinner} />{uploadProgress || 'Creating...'}</span>
-                            : <span>🚀 {forSale ? 'Create & List NFT' : 'Save to Wallet'}</span>
-                        }
-                    </button>
+                    !walletReady ? (
+                        <button style={{ ...s.nextBtn, flex: 1, background: '#9945FF' }}
+                                onClick={async () => {
+                                    try { await (window as any).solana.connect(); }
+                                    catch { /* user rejected */ }
+                                }}>
+                            👻 Connect Phantom Wallet
+                        </button>
+                    ) : (
+                        <button style={{ ...s.nextBtn, flex: 1, opacity: loading ? 0.7 : 1 }}
+                                onClick={handleCreateSubmit} disabled={loading}>
+                            {loading
+                                ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}><span style={s.btnSpinner} />{uploadProgress || 'Creating...'}</span>
+                                : <span>🚀 {forSale ? `Create & List ${isCollection ? 'Collection' : 'NFT'}` : `Save to Wallet`}</span>
+                            }
+                        </button>
+                    )
                 )}
             </div>
         </div>
     );
 };
 
-// ─── Стилі ───────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const s: any = {
     page:          { background: '#f5f5f5', minHeight: '100vh', paddingBottom: '100px' },
-    modeTabs:      { display: 'flex', margin: '16px 15px 0', background: '#f0f0f0', borderRadius: '25px', padding: '4px' },
-    modeTab:       { flex: 1, padding: '11px', border: 'none', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold', fontSize: '13px', transition: 'all 0.25s' },
+    modeTabs:      { display: 'flex', margin: '16px 15px 0', background: '#f0f0f0', borderRadius: '25px', padding: '4px', gap: '2px' },
+    modeTab:       { flex: 1, padding: '10px', border: 'none', borderRadius: '20px', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px', transition: 'all 0.25s', position: 'relative' },
     progressWrap:  { display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px 30px 8px', gap: 0 },
     progressStep:  { width: '32px', height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: 'bold', transition: 'all 0.3s', flexShrink: 0 },
     progressLine:  { flex: 1, height: '3px', transition: 'background 0.3s' },
@@ -718,7 +972,6 @@ const s: any = {
     stepContent:   { background: 'white', margin: '0 15px', borderRadius: '16px', padding: '20px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' },
     stepTitle:     { fontSize: '20px', fontWeight: 'bold', color: '#222', marginBottom: '4px' },
     stepSub:       { fontSize: '13px', color: '#888', marginBottom: '20px' },
-    // Wallet mode
     miniSpinner:   { width: '32px', height: '32px', border: '3px solid #ddd', borderTop: '3px solid #01ff77', borderRadius: '50%', animation: 'spin 0.8s linear infinite', margin: '0 auto' },
     emptyWallet:   { textAlign: 'center', padding: '30px 10px', color: '#555' },
     nftPickGrid:   { display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px', marginBottom: '16px' },
@@ -730,13 +983,11 @@ const s: any = {
     sellPreviewImg:{ width: '60px', height: '60px', borderRadius: '10px', objectFit: 'cover', flexShrink: 0 },
     changeBtn:     { background: 'rgba(0,0,0,0.08)', border: 'none', borderRadius: '10px', padding: '5px 10px', fontSize: '11px', cursor: 'pointer', color: '#555', flexShrink: 0 },
     priceNote:     { fontSize: '12px', color: '#888', marginTop: '6px', padding: '8px 10px', background: '#f8f8f8', borderRadius: '8px' },
-    // Create mode
     dropZone:      { border: '2px dashed', borderRadius: '12px', minHeight: '160px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', marginBottom: '20px', transition: 'all 0.2s', overflow: 'hidden' },
     dropContent:   { textAlign: 'center', padding: '20px' },
     previewWrap:   { position: 'relative', width: '100%' },
     previewImg:    { width: '100%', maxHeight: '220px', objectFit: 'cover', display: 'block' },
     removeImgBtn:  { position: 'absolute', top: '8px', right: '8px', background: 'rgba(0,0,0,0.6)', color: 'white', border: 'none', borderRadius: '20px', padding: '4px 12px', cursor: 'pointer', fontSize: '12px' },
-    // Shared form
     field:         { marginBottom: '18px' },
     fieldLabel:    { display: 'block', fontWeight: '600', fontSize: '13px', color: '#444', marginBottom: '6px' },
     input:         { width: '100%', padding: '11px 14px', border: '1px solid #e0e0e0', borderRadius: '10px', fontSize: '15px', background: '#fafafa', outline: 'none', boxSizing: 'border-box' },
@@ -754,7 +1005,6 @@ const s: any = {
     slider:        { width: '100%', accentColor: '#01ff77', marginBottom: '4px' },
     reviewCard:    { display: 'flex', gap: '14px', background: '#f8f8f8', borderRadius: '12px', padding: '14px', marginBottom: '20px' },
     reviewImg:     { width: '80px', height: '80px', borderRadius: '10px', objectFit: 'cover' },
-    reviewTag:     { fontSize: '11px', color: '#01bb55', background: '#f0fff4', borderRadius: '10px', padding: '2px 8px' },
     toggleRow:     { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8f8f8', borderRadius: '12px', padding: '16px', marginBottom: '16px' },
     toggle:        { width: '50px', height: '28px', borderRadius: '14px', position: 'relative', cursor: 'pointer', transition: 'background 0.3s', flexShrink: 0 },
     toggleThumb:   { position: 'absolute', width: '20px', height: '20px', background: 'white', borderRadius: '50%', top: '4px', transition: 'left 0.3s', boxShadow: '0 2px 4px rgba(0,0,0,0.2)' },

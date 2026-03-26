@@ -1,126 +1,134 @@
 import { useState, useEffect } from 'react';
-import {
-    getPosts,
-    createPost,
-    likePost,
-    addComment,
-    Post,
-    Comment
-} from '../firebase/posts';
 import { useAuth } from '../context/AuthContext';
+import { apiGetPosts, apiCreatePost, apiLikePost, apiAddComment } from '../services/apiClient';
 
-export interface PostWithLiked extends Post {
+export interface PostWithLiked {
+    id: string;
+    userId: string;
+    userName: string;
+    userAvatar?: string;
+    nftImage?: string;
+    title: string;
+    description: string;
+    tags?: string[];
+    blockchain?: string;
+    price?: number;
+    currency?: string;
+    forSale?: boolean;
+    walletNftId?: string;
+    likes: number;
+    likedBy?: string[];
+    comments?: any[];
+    createdAt: string;
     liked: boolean;
 }
 
 export const usePosts = () => {
-    const [posts, setPosts] = useState<PostWithLiked[]>([]);
+    const [posts, setPosts]   = useState<PostWithLiked[]>([]);
     const [loading, setLoading] = useState(true);
-    const { currentUser } = useAuth();
+    const { currentUser }     = useAuth();
 
-    useEffect(() => {
-        loadPosts();
-    }, [currentUser]);
+    useEffect(() => { loadPosts(); }, [currentUser]); // eslint-disable-line
 
     const loadPosts = async () => {
         setLoading(true);
-        const result = await getPosts();
-        if (result.success && result.posts) {
-            const postsWithLiked = result.posts.map(post => ({
-                ...post,
-                liked: currentUser ? (post.likedBy || []).includes(currentUser.uid) : false
+        try {
+            const data = await apiGetPosts();
+            const mapped = (data || []).map((p: any) => ({
+                id:          p.id,
+                userId:      p.userId,
+                userName:    p.userName,
+                userAvatar:  p.userAvatar,
+                nftImage:    p.nftImage,
+                title:       p.title,
+                description: p.description,
+                tags:        p.tags || [],
+                blockchain:  p.blockchain,
+                price:       p.price,
+                currency:    p.currency,
+                forSale:     p.forSale,
+                walletNftId: p.walletNftId,
+                likes:       p.likes || 0,
+                likedBy:     p.likedBy || [],
+                comments:    (p.comments || []).map((c: any) => ({
+                    id:         c.id,
+                    userId:     c.userId,
+                    userName:   c.userName,
+                    userAvatar: c.userAvatar,
+                    text:       c.text,
+                    createdAt:  c.createdAt,
+                })),
+                createdAt:   p.createdAt,
+                liked: currentUser ? (p.likedBy || []).includes(currentUser.uid) : false,
             }));
-            setPosts(postsWithLiked);
+            setPosts(mapped);
+        } catch (e) {
+            console.error('Error loading posts:', e);
+            setPosts([]);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
-    // ← ВИПРАВЛЕНО: зберігаємо nftImage (відповідає Post інтерфейсу)
     const addPost = async (postData: {
         image: string;
         title: string;
         description: string;
         tags?: string[];
-        category?: string;
-        blockchain?: string;
-        royalty?: number;
-        price?: number | null;
         forSale?: boolean;
+        price?: number | null;
         currency?: string;
+        walletNftId?: string;
     }) => {
-        if (!currentUser) return { success: false, error: 'No user logged in' };
-
-        const newPost = {
-            userId: currentUser.uid,
-            userName: currentUser.name,
-            userAvatar: currentUser.avatar || '/img/default-avatar.png',
-            nftImage: postData.image,   // ← image → nftImage
-            title: postData.title,
-            description: postData.description,
-            tags: postData.tags || [],
-            // Додаткові поля для NFT
-            ...(postData.category   && { category: postData.category }),
-            ...(postData.blockchain && { blockchain: postData.blockchain }),
-            ...(postData.royalty    && { royalty: postData.royalty }),
-            ...(postData.price      && { price: postData.price }),
-            ...(postData.forSale    !== undefined && { forSale: postData.forSale }),
-            ...(postData.currency   && { currency: postData.currency }),
-        };
-
-        const result = await createPost(newPost);
-        if (result.success) {
+        if (!currentUser) return { success: false, error: 'Not logged in' };
+        try {
+            await apiCreatePost({
+                nftImage:    postData.image,
+                title:       postData.title,
+                description: postData.description,
+                tags:        postData.tags || [],
+                forSale:     postData.forSale || false,
+                price:       postData.price ?? null,
+                currency:    postData.currency,
+                walletNftId: postData.walletNftId,
+            });
             await loadPosts();
             return { success: true };
+        } catch (e: any) {
+            return { success: false, error: e.message };
         }
-        return result;
     };
 
     const handleLike = async (postId: string) => {
         if (!currentUser) return;
-        const result = await likePost(postId, currentUser.uid);
-        if (result.success) {
-            setPosts(prev =>
-                prev.map(post => {
-                    if (post.id === postId) {
-                        const wasLiked = post.liked;
-                        return {
-                            ...post,
-                            liked: !wasLiked,
-                            likes: wasLiked ? post.likes - 1 : post.likes + 1
-                        };
-                    }
-                    return post;
-                })
-            );
-        }
+        try {
+            await apiLikePost(postId);
+            setPosts(prev => prev.map(p => {
+                if (p.id !== postId) return p;
+                const wasLiked = p.liked;
+                return { ...p, liked: !wasLiked, likes: wasLiked ? p.likes - 1 : p.likes + 1 };
+            }));
+        } catch (e) { console.error('Like error:', e); }
     };
 
     const handleAddComment = async (postId: string, text: string) => {
         if (!currentUser || !text.trim()) return;
-        const comment = {
-            userId: currentUser.uid,
-            userName: currentUser.name,
-            userAvatar: currentUser.avatar || '/img/default-avatar.png',
-            text
-        };
-        const result = await addComment(postId, comment);
-        if (result.success && result.comment) {
-            setPosts(prev =>
-                prev.map(post =>
-                    post.id === postId
-                        ? { ...post, comments: [...(post.comments || []), result.comment!] }
-                        : post
-                )
-            );
-        }
+        try {
+            const comment = await apiAddComment(postId, text);
+            setPosts(prev => prev.map(p =>
+                p.id === postId
+                    ? { ...p, comments: [...(p.comments || []), comment] }
+                    : p
+            ));
+        } catch (e) { console.error('Comment error:', e); }
     };
 
     return {
         posts,
         loading,
         addPost,
-        likePost: handleLike,
-        addComment: handleAddComment,
-        refreshPosts: loadPosts
+        likePost:     handleLike,
+        addComment:   handleAddComment,
+        refreshPosts: loadPosts,
     };
 };

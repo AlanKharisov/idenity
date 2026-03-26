@@ -9,6 +9,12 @@ interface NFT {
     ownerId: string;
     ownerName: string;
     price?: number;
+    currency?: string;
+    blockchain?: string;
+    royalty?: number;
+    tags?: string[];
+    category?: string;
+    forSale?: boolean;
     createdAt?: string;
 }
 
@@ -226,7 +232,7 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
                 {nft.price && (
                     <div>
                         <div style={{ color: '#888', fontSize: '12px' }}>Price</div>
-                        <div style={{ color: '#01ff77', fontWeight: 'bold' }}>{nft.price} ETH</div>
+                        <div style={{ color: '#01ff77', fontWeight: 'bold' }}>{nft.price} {nft.currency || 'SOL'}</div>
                     </div>
                 )}
             </div>

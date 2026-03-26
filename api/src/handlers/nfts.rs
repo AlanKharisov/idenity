@@ -1,0 +1,403 @@
+use axum::{
+    extract::{Multipart, Path, State},
+    http::StatusCode,
+    Extension, Json,
+};
+use chrono::Utc;
+use serde_json::json;
+use std::sync::Arc;
+use uuid::Uuid;
+
+use crate::{
+    errors::{ApiResult, AppError},
+    middleware::auth::AuthenticatedUser,
+    models::{BatchItemResult, BatchNftInput, BatchUploadResponse, CreateNftRequest, Nft, UpdateNftRequest},
+    notification_helpers,
+    services::StorageClient,
+    AppState,
+};
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn ext_from_ct(ct: &str) -> &str {
+    match ct {
+        "image/png" => "png",
+        "image/gif" => "gif",
+        "image/webp" => "webp",
+        _ => "jpg",
+    }
+}
+
+/// Load the `nfts` array from `marki_wallets/{uid}`.
+async fn load_nfts(state: &AppState, uid: &str) -> ApiResult<Vec<Nft>> {
+    let doc = state
+        .firestore
+        .get("marki_wallets", uid)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?
+        .unwrap_or_else(|| json!({ "nfts": [] }));
+
+    let nfts: Vec<Nft> = doc
+        .get("nfts")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    Ok(nfts)
+}
+
+/// Persist the `nfts` array back to `marki_wallets/{uid}`.
+async fn save_nfts(state: &AppState, uid: &str, nfts: &[Nft]) -> ApiResult<()> {
+    state
+        .firestore
+        .update("marki_wallets", uid, &json!({ "nfts": nfts }))
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+    Ok(())
+}
+
+/// Upload image bytes to Firebase Storage and return the public URL.
+async fn upload_nft_image(
+    state: &AppState,
+    owner_id: &str,
+    nft_id: &str,
+    bytes: Vec<u8>,
+    content_type: &str,
+) -> ApiResult<String> {
+    let ext = ext_from_ct(content_type);
+    let path = StorageClient::nft_path(owner_id, nft_id, ext);
+    state
+        .storage
+        .upload(&path, bytes, content_type)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))
+}
+
+// ── Handlers ──────────────────────────────────────────────────────────────────
+
+/// `GET /api/nfts`
+pub async fn get_nfts(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+) -> ApiResult<Json<Vec<Nft>>> {
+    let nfts = load_nfts(&state, &auth.uid).await?;
+    Ok(Json(nfts))
+}
+
+/// `GET /api/nfts/:id`
+pub async fn get_nft(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+    Path(nft_id): Path<String>,
+) -> ApiResult<Json<Nft>> {
+    let nfts = load_nfts(&state, &auth.uid).await?;
+    let nft = nfts
+        .into_iter()
+        .find(|n| n.id == nft_id)
+        .ok_or_else(|| AppError::NotFound(format!("NFT {} not found", nft_id)))?;
+    Ok(Json(nft))
+}
+
+/// `POST /api/nfts`
+/// Multipart body: `image` (file) + `metadata` (JSON string).
+pub async fn create_nft(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+    mut multipart: Multipart,
+) -> ApiResult<(StatusCode, Json<Nft>)> {
+    let mut image_bytes: Option<Vec<u8>> = None;
+    let mut image_ct = "image/jpeg".to_owned();
+    let mut meta: Option<CreateNftRequest> = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+    {
+        let name = field.name().unwrap_or("").to_owned();
+        match name.as_str() {
+            "image" => {
+                image_ct = field
+                    .content_type()
+                    .unwrap_or("image/jpeg")
+                    .to_owned();
+                image_bytes = Some(
+                    field
+                        .bytes()
+                        .await
+                        .map_err(|e| AppError::BadRequest(e.to_string()))?
+                        .to_vec(),
+                );
+            }
+            "metadata" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
+                meta = Some(
+                    serde_json::from_str(text.trim())
+                        .map_err(|e| AppError::BadRequest(format!("Invalid metadata JSON: {}", e)))?,
+                );
+            }
+            _ => {
+                // Drain unrecognised fields to keep the multipart stream healthy.
+                let _ = field.bytes().await;
+            }
+        }
+    }
+
+    let bytes = image_bytes
+        .ok_or_else(|| AppError::BadRequest("Missing 'image' field".to_owned()))?;
+    let req = meta.ok_or_else(|| AppError::BadRequest("Missing 'metadata' field".to_owned()))?;
+
+    // Fetch owner name from profile.
+    let user_doc = state
+        .firestore
+        .get("users", &auth.uid)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+    let owner_name = user_doc
+        .as_ref()
+        .and_then(|d| d.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown")
+        .to_owned();
+
+    let nft_id = Uuid::new_v4().to_string();
+    let image_url = upload_nft_image(&state, &auth.uid, &nft_id, bytes, &image_ct).await?;
+
+    // Build the off-chain Metaplex metadata JSON and upload it to Firebase Storage
+    // so the frontend can hand `metadataUri` straight to Umi's `createNft()`.
+    let metadata_json = json!({
+        "name":        req.title,
+        "symbol":      "",
+        "description": req.description,
+        "image":       image_url,
+        "attributes": [
+            { "trait_type": "Category",    "value": req.category.as_deref().unwrap_or("Art") },
+            { "trait_type": "Blockchain",  "value": "Solana" }
+        ],
+        "properties": {
+            "files":    [{ "uri": image_url, "type": image_ct }],
+            "category": "image"
+        }
+    });
+    let metadata_bytes = serde_json::to_vec(&metadata_json)
+        .map_err(|e| AppError::BadRequest(format!("Failed to serialise metadata: {}", e)))?;
+    let metadata_path = StorageClient::metadata_path(&auth.uid, &nft_id);
+    let metadata_uri = state
+        .storage
+        .upload(&metadata_path, metadata_bytes, "application/json")
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+
+    let nft = Nft {
+        id: nft_id,
+        title: req.title.clone(),
+        description: req.description,
+        image: image_url,
+        tags: req.tags,
+        category: req.category,
+        blockchain: Some(req.blockchain),
+        royalty: Some(req.royalty),
+        owner_id: auth.uid.clone(),
+        owner_name,
+        price: req.price,
+        for_sale: req.for_sale,
+        currency: Some(req.currency),
+        created_at: Utc::now().to_rfc3339(),
+        metadata_uri: Some(metadata_uri),
+        mint_address: None,
+    };
+
+    let mut nfts = load_nfts(&state, &auth.uid).await?;
+    nfts.push(nft.clone());
+    save_nfts(&state, &auth.uid, &nfts).await?;
+
+    notification_helpers::notify_nft_created(&state.firestore, &auth.uid, &req.title).await;
+
+    Ok((StatusCode::CREATED, Json(nft)))
+}
+
+/// `POST /api/nfts/batch`
+/// Multipart body: multiple `images[]` fields + one `metadata` JSON field.
+pub async fn batch_create_nfts(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+    mut multipart: Multipart,
+) -> ApiResult<Json<BatchUploadResponse>> {
+    // Collect all files first, then process.
+    let mut files: Vec<(Vec<u8>, String)> = Vec::new(); // (bytes, content_type)
+    let mut batch_meta: Option<BatchNftInput> = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+    {
+        let name = field.name().unwrap_or("").to_owned();
+        match name.as_str() {
+            "metadata" => {
+                let text = field
+                    .text()
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
+                batch_meta = Some(
+                    serde_json::from_str(text.trim())
+                        .map_err(|e| AppError::BadRequest(format!("Invalid metadata: {}", e)))?,
+                );
+            }
+            // Accept both "images[]" (PHP-style) and plain "images"
+            n if n == "images[]" || n == "images" => {
+                let ct = field
+                    .content_type()
+                    .unwrap_or("image/jpeg")
+                    .to_owned();
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?
+                    .to_vec();
+                if !bytes.is_empty() {
+                    files.push((bytes, ct));
+                }
+            }
+            _ => {
+                // Drain unrecognised fields to keep the multipart stream healthy.
+                let _ = field.bytes().await;
+            }
+        }
+    }
+
+    if files.is_empty() {
+        return Err(AppError::BadRequest("No image files provided".to_owned()));
+    }
+
+    let shared = batch_meta
+        .ok_or_else(|| AppError::BadRequest("Missing 'metadata' field".to_owned()))?;
+
+    // Fetch owner name once.
+    let user_doc = state
+        .firestore
+        .get("users", &auth.uid)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+    let owner_name = user_doc
+        .as_ref()
+        .and_then(|d| d.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("Unknown")
+        .to_owned();
+
+    let mut nfts = load_nfts(&state, &auth.uid).await?;
+    let mut results: Vec<BatchItemResult> = Vec::with_capacity(files.len());
+    let mut created = 0usize;
+    let mut failed = 0usize;
+
+    for (index, (bytes, ct)) in files.into_iter().enumerate() {
+        let item_meta = shared.items.get(index);
+        let title = item_meta
+            .and_then(|m| m.title.as_deref())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("NFT #{}", index + 1));
+        let description = item_meta
+            .and_then(|m| m.description.as_deref())
+            .unwrap_or("")
+            .to_owned();
+        let price = item_meta.and_then(|m| m.price).or(None);
+
+        let nft_id = Uuid::new_v4().to_string();
+        match upload_nft_image(&state, &auth.uid, &nft_id, bytes, &ct).await {
+            Ok(image_url) => {
+                let nft = Nft {
+                    id: nft_id.clone(),
+                    title: title.clone(),
+                    description,
+                    image: image_url,
+                    tags: shared.tags.clone(),
+                    category: None,
+                    blockchain: Some(shared.blockchain.clone()),
+                    royalty: Some(shared.royalty),
+                    owner_id: auth.uid.clone(),
+                    owner_name: owner_name.clone(),
+                    price,
+                    for_sale: shared.for_sale,
+                    currency: Some(shared.currency.clone()),
+                    created_at: Utc::now().to_rfc3339(),
+                    metadata_uri: None,
+                    mint_address: None,
+                };
+                nfts.push(nft);
+                results.push(BatchItemResult {
+                    index,
+                    id: Some(nft_id),
+                    status: "ok".to_owned(),
+                    message: None,
+                });
+                created += 1;
+            }
+            Err(e) => {
+                results.push(BatchItemResult {
+                    index,
+                    id: None,
+                    status: "error".to_owned(),
+                    message: Some(e.to_string()),
+                });
+                failed += 1;
+            }
+        }
+    }
+
+    // Persist all successfully created NFTs in one write.
+    if created > 0 {
+        save_nfts(&state, &auth.uid, &nfts).await?;
+        notification_helpers::notify_batch_created(&state.firestore, &auth.uid, created).await;
+    }
+
+    Ok(Json(BatchUploadResponse { created, failed, results }))
+}
+
+/// `PUT /api/nfts/:id`
+pub async fn update_nft(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+    Path(nft_id): Path<String>,
+    Json(body): Json<UpdateNftRequest>,
+) -> ApiResult<Json<Nft>> {
+    let mut nfts = load_nfts(&state, &auth.uid).await?;
+
+    let nft = nfts
+        .iter_mut()
+        .find(|n| n.id == nft_id)
+        .ok_or_else(|| AppError::NotFound(format!("NFT {} not found", nft_id)))?;
+
+    if let Some(v) = body.title        { nft.title = v; }
+    if let Some(v) = body.description  { nft.description = v; }
+    if let Some(v) = body.tags         { nft.tags = v; }
+    if let Some(v) = body.category     { nft.category = Some(v); }
+    if let Some(v) = body.price        { nft.price = Some(v); }
+    if let Some(v) = body.for_sale     { nft.for_sale = v; }
+    if let Some(v) = body.currency     { nft.currency = Some(v); }
+    if let Some(v) = body.mint_address { nft.mint_address = Some(v); }
+
+    let updated = nft.clone();
+    save_nfts(&state, &auth.uid, &nfts).await?;
+    Ok(Json(updated))
+}
+
+/// `DELETE /api/nfts/:id`
+pub async fn delete_nft(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+    Path(nft_id): Path<String>,
+) -> ApiResult<StatusCode> {
+    let mut nfts = load_nfts(&state, &auth.uid).await?;
+    let len_before = nfts.len();
+    nfts.retain(|n| n.id != nft_id);
+
+    if nfts.len() == len_before {
+        return Err(AppError::NotFound(format!("NFT {} not found", nft_id)));
+    }
+
+    save_nfts(&state, &auth.uid, &nfts).await?;
+    Ok(StatusCode::NO_CONTENT)
+}

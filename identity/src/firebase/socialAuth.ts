@@ -5,14 +5,14 @@ import {
     OAuthProvider,
     UserCredential
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { auth, db } from './config';
+import { auth } from './config';
+import { apiMe, apiRegister } from '../services/apiClient';
 
-// Google вход
+// Google sign-in
 export const signInWithGoogle = async (): Promise<{ success: boolean; user?: any; error?: string }> => {
     try {
         const provider = new GoogleAuthProvider();
-        const result = await signInWithPopup(auth, provider);
+        const result   = await signInWithPopup(auth, provider);
         return await handleSocialAuthResult(result);
     } catch (error: any) {
         console.error('Google sign in error:', error);
@@ -20,11 +20,11 @@ export const signInWithGoogle = async (): Promise<{ success: boolean; user?: any
     }
 };
 
-// Facebook вход
+// Facebook sign-in
 export const signInWithFacebook = async (): Promise<{ success: boolean; user?: any; error?: string }> => {
     try {
         const provider = new FacebookAuthProvider();
-        const result = await signInWithPopup(auth, provider);
+        const result   = await signInWithPopup(auth, provider);
         return await handleSocialAuthResult(result);
     } catch (error: any) {
         console.error('Facebook sign in error:', error);
@@ -32,11 +32,11 @@ export const signInWithFacebook = async (): Promise<{ success: boolean; user?: a
     }
 };
 
-// Apple вход
+// Apple sign-in
 export const signInWithApple = async (): Promise<{ success: boolean; user?: any; error?: string }> => {
     try {
         const provider = new OAuthProvider('apple.com');
-        const result = await signInWithPopup(auth, provider);
+        const result   = await signInWithPopup(auth, provider);
         return await handleSocialAuthResult(result);
     } catch (error: any) {
         console.error('Apple sign in error:', error);
@@ -44,28 +44,32 @@ export const signInWithApple = async (): Promise<{ success: boolean; user?: any;
     }
 };
 
-// Обработка результата соц. входа
+// After Firebase popup succeeds, ensure user exists in Rust backend
 const handleSocialAuthResult = async (result: UserCredential) => {
-    const user = result.user;
+    const fbUser = result.user;
+    try {
+        // Check if user already registered in Rust API
+        const existing = await apiMe().catch(() => null);
+        if (existing) {
+            return { success: true, user: existing };
+        }
 
-    // Проверяем, есть ли пользователь в Firestore
-    const userDoc = await getDoc(doc(db, 'users', user.uid));
+        // New user — register in Rust backend
+        const displayName = fbUser.displayName || 'User';
+        const nameParts   = displayName.split(' ');
+        const username    = (nameParts[0] || 'user').toLowerCase() + fbUser.uid.slice(-4);
 
-    if (!userDoc.exists()) {
-        // Создаем нового пользователя
-        const userData = {
-            uid: user.uid,
-            name: user.displayName || 'User',
-            email: user.email || '',
-            avatar: user.photoURL || '/img/default-avatar.png',
-            location: '',
-            bio: '',
-            createdAt: new Date().toISOString()
-        };
+        await apiRegister({
+            uid:      fbUser.uid,
+            name:     displayName,
+            username,
+            email:    fbUser.email || '',
+        });
 
-        await setDoc(doc(db, 'users', user.uid), userData);
+        const userData = await apiMe();
         return { success: true, user: userData };
-    } else {
-        return { success: true, user: userDoc.data() };
+    } catch (error: any) {
+        console.error('Social auth backend sync error:', error);
+        return { success: false, error: error.message };
     }
 };

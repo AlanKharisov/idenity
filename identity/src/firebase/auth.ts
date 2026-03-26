@@ -11,12 +11,16 @@ import { auth, db } from './config';
 export interface UserData {
     uid: string;
     name: string;
+    username?: string;
     email: string;
     phone?: string;
     avatar?: string;
     location?: string;
     bio?: string;
     createdAt: string;
+    companyApproved?: boolean;
+    pendingApproval?: boolean;
+    deliveryAddress?: string;
 }
 
 // Регистрация

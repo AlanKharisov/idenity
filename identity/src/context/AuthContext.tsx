@@ -1,9 +1,14 @@
 import React, { createContext, useState, useContext, useEffect } from 'react';
 import { auth } from '../firebase/config';
-import { onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile, signOut } from 'firebase/auth';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import {
+    onAuthStateChanged,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    updateProfile,
+    signOut,
+} from 'firebase/auth';
 import { getLocationFromCoords, getLocationByIP } from '../services/geocoding';
+import { apiRegister, apiMe, apiUpdateProfile } from '../services/apiClient';
 
 export interface UserData {
     uid: string;
@@ -15,115 +20,95 @@ export interface UserData {
     location?: string;
     bio?: string;
     createdAt: string;
+    companyApproved?: boolean;
+    pendingApproval?: boolean;
+    deliveryAddress?: string;
 }
 
 interface AuthContextType {
     currentUser: UserData | null;
     loading: boolean;
-    login: (email: string, password: string) => Promise<{ success: boolean; user?: UserData; error?: string }>;
+    login:  (email: string, password: string) => Promise<{ success: boolean; user?: UserData; error?: string }>;
     register: (email: string, password: string, name: string, username: string, phone?: string) => Promise<{ success: boolean; user?: UserData; error?: string }>;
     logout: () => Promise<{ success: boolean; error?: string }>;
     updateUserLocation: (location: string) => Promise<void>;
-    updateUserProfile: (data: { name?: string; bio?: string; avatar?: string; username?: string }) => Promise<void>;
-    refreshLocation: () => Promise<void>;
+    updateUserProfile:  (data: { name?: string; bio?: string; avatar?: string; username?: string }) => Promise<void>;
+    refreshLocation:    () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const useAuth = () => {
-    const context = useContext(AuthContext);
-    if (!context) {
-        throw new Error('useAuth must be used within an AuthProvider');
-    }
-    return context;
+    const ctx = useContext(AuthContext);
+    if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
+    return ctx;
 };
 
-const createWalletForUser = async (userId: string, email: string) => {
-    try {
-        const walletRef = doc(db, 'wallets', userId);
-        const walletData = {
-            address: '0x' + Array.from({ length: 40 }, () =>
-                Math.floor(Math.random() * 16).toString(16)
-            ).join(''),
-            email,
-            password: 'default',
-            recoveryPhrase: generateRecoveryPhrase(),
-            balance: { ICP: 100, POLYGON: 50, SOLANA: 25 },
-            nfts: [],
-            createdAt: new Date().toISOString()
-        };
-        await setDoc(walletRef, walletData);
-        return walletData;
-    } catch (error) {
-        console.error('Error creating wallet:', error);
-        return null;
-    }
-};
-
-const generateRecoveryPhrase = (): string => {
-    const words = ['Galaxy', 'Bamboo', 'Velvet', 'Pyramid', 'Harmony', 'Rocket', 'Symbol', 'Orbit', 'Wisdom', 'Foil', 'Trophy', 'Harbor'];
-    return words.join(' ');
-};
-
-// ← ВИПРАВЛЕНО: геолокація з таймаутом 3 секунди — не висить вічно
+// ─── Geolocation (unchanged) ──────────────────────────────────────────────────
 const getUserLocation = async (): Promise<string> => {
     try {
-        const timeout = new Promise<string>((resolve) =>
-            setTimeout(() => resolve('Unknown location'), 3000)
-        );
-
-        const ipLocationPromise = getLocationByIP().then(loc => loc || '').catch(() => '');
-        const ipLocation = await Promise.race([ipLocationPromise, timeout]);
-
-        if (ipLocation && ipLocation !== 'Unknown location') return ipLocation;
+        const timeout = new Promise<string>(r => setTimeout(() => r('Unknown location'), 3000));
+        const ipLoc = await Promise.race([
+            getLocationByIP().then(l => l || '').catch(() => ''),
+            timeout,
+        ]);
+        if (ipLoc && ipLoc !== 'Unknown location') return ipLoc;
 
         if (navigator.geolocation) {
-            return new Promise((resolve) => {
-                const geoTimeout = setTimeout(() => resolve('Unknown location'), 4000);
+            return new Promise(resolve => {
+                const t = setTimeout(() => resolve('Unknown location'), 4000);
                 navigator.geolocation.getCurrentPosition(
-                    async (position) => {
-                        clearTimeout(geoTimeout);
-                        const { latitude, longitude } = position.coords;
-                        const locationName = await getLocationFromCoords(latitude, longitude).catch(() => null);
-                        resolve(locationName || 'Unknown location');
+                    async pos => {
+                        clearTimeout(t);
+                        const loc = await getLocationFromCoords(
+                            pos.coords.latitude, pos.coords.longitude
+                        ).catch(() => null);
+                        resolve(loc || 'Unknown location');
                     },
-                    () => {
-                        clearTimeout(geoTimeout);
-                        resolve('Unknown location');
-                    },
+                    () => { clearTimeout(t); resolve('Unknown location'); },
                     { timeout: 4000 }
                 );
             });
         }
-
         return 'Unknown location';
-    } catch {
-        return 'Unknown location';
-    }
+    } catch { return 'Unknown location'; }
 };
 
+// ─── Map Rust API response to UserData ────────────────────────────────────────
+const mapUser = (u: any): UserData => ({
+    uid:             u.uid,
+    name:            u.name,
+    username:        u.username,
+    email:           u.email,
+    phone:           u.phone,
+    avatar:          u.avatar || '/img/default-avatar.png',
+    location:        u.location,
+    bio:             u.bio,
+    createdAt:       u.createdAt || new Date().toISOString(),
+    companyApproved: u.companyApproved ?? false,
+    pendingApproval: u.pendingApproval ?? false,
+    deliveryAddress: u.deliveryAddress,
+});
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [currentUser, setCurrentUser] = useState<UserData | null>(null);
-    const [loading, setLoading] = useState(true);
+    const [loading, setLoading]         = useState(true);
 
     const updateUserLocation = async (location: string) => {
         if (!currentUser) return;
         try {
-            await updateDoc(doc(db, 'users', currentUser.uid), { location });
+            await apiUpdateProfile(currentUser.uid, { location });
             setCurrentUser(prev => prev ? { ...prev, location } : null);
-        } catch (error) {
-            console.error('Error updating location:', error);
-        }
+        } catch (e) { console.error('Location update error:', e); }
     };
 
     const updateUserProfile = async (data: { name?: string; bio?: string; avatar?: string; username?: string }) => {
         if (!currentUser) return;
         try {
-            await updateDoc(doc(db, 'users', currentUser.uid), data);
+            await apiUpdateProfile(currentUser.uid, data);
             setCurrentUser(prev => prev ? { ...prev, ...data } : null);
-        } catch (error) {
-            console.error('Error updating profile:', error);
-        }
+        } catch (e) { console.error('Profile update error:', e); }
     };
 
     const refreshLocation = async () => {
@@ -133,45 +118,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
             try {
-                if (user) {
-                    const userRef = doc(db, 'users', user.uid);
-                    const userDoc = await getDoc(userRef);
-
-                    if (userDoc.exists()) {
-                        setCurrentUser(userDoc.data() as UserData);
-                    } else {
-                        // ← ВИПРАВЛЕНО: геолокація не блокує — запускаємо паралельно
-                        const location = await getUserLocation();
-
-                        const newUser: UserData = {
-                            uid: user.uid,
-                            name: user.displayName || 'User',
-                            username: (user.email?.split('@')[0] || 'user') + Math.floor(Math.random() * 1000),
-                            email: user.email || '',
-                            avatar: user.photoURL || '/img/default-avatar.png',
-                            location,
-                            bio: '',
-                            createdAt: new Date().toISOString()
-                        };
-
-                        await setDoc(userRef, newUser);
-                        await createWalletForUser(user.uid, user.email || '');
-                        setCurrentUser(newUser);
-                    }
+                if (firebaseUser) {
+                    // Fetch profile from Rust API (protected, Firebase JWT required)
+                    const userData = await apiMe().catch(() => null);
+                    setCurrentUser(userData ? mapUser(userData) : null);
                 } else {
                     setCurrentUser(null);
                 }
-            } catch (error) {
-                console.error('Auth state change error:', error);
+            } catch (e) {
+                console.error('Auth state error:', e);
                 setCurrentUser(null);
             } finally {
-                // ← ВИПРАВЛЕНО: setLoading(false) викликається ЗАВЖДИ
                 setLoading(false);
             }
         });
-
         return unsubscribe;
     }, []);
 
@@ -179,35 +141,33 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             await signInWithEmailAndPassword(auth, email, password);
             return { success: true };
-        } catch (error: any) {
-            return { success: false, error: error.message };
+        } catch (e: any) {
+            return { success: false, error: e.message };
         }
     };
 
-    const register = async (email: string, password: string, name: string, username: string, phone?: string) => {
+    const register = async (
+        email: string, password: string, name: string, username: string, phone?: string
+    ) => {
         try {
             const result = await createUserWithEmailAndPassword(auth, email, password);
             await updateProfile(result.user, { displayName: name });
 
+            // Create profile + wallet on Rust backend (public endpoint)
+            await apiRegister({ uid: result.user.uid, name, username, email, phone });
+
+            // Attach location (best-effort, token is now available)
             const location = await getUserLocation();
-            const newUser: UserData = {
-                uid: result.user.uid,
-                name,
-                username,
-                email,
-                phone: phone || '',
-                avatar: '/img/default-avatar.png',
-                location,
-                bio: '',
-                createdAt: new Date().toISOString()
+            try { await apiUpdateProfile(result.user.uid, { location }); } catch { /* non-critical */ }
+
+            const userData: UserData = {
+                uid: result.user.uid, name, username, email, phone: phone || '',
+                avatar: '/img/default-avatar.png', location, bio: '',
+                createdAt: new Date().toISOString(),
             };
-
-            await setDoc(doc(db, 'users', result.user.uid), newUser);
-            await createWalletForUser(result.user.uid, email);
-
-            return { success: true, user: newUser };
-        } catch (error: any) {
-            return { success: false, error: error.message };
+            return { success: true, user: userData };
+        } catch (e: any) {
+            return { success: false, error: e.message };
         }
     };
 
@@ -215,23 +175,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         try {
             await signOut(auth);
             return { success: true };
-        } catch (error: any) {
-            return { success: false, error: error.message };
+        } catch (e: any) {
+            return { success: false, error: e.message };
         }
     };
 
     return (
         <AuthContext.Provider value={{
-            currentUser,
-            loading,
-            login,
-            register,
-            logout,
-            updateUserLocation,
-            updateUserProfile,
-            refreshLocation
+            currentUser, loading,
+            login, register, logout,
+            updateUserLocation, updateUserProfile, refreshLocation,
         }}>
-            {/* ← ВИПРАВЛЕНО: завжди рендеримо children, loading передаємо через контекст */}
             {children}
         </AuthContext.Provider>
     );
