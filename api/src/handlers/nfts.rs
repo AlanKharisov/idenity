@@ -353,11 +353,33 @@ pub async fn batch_create_nfts(
         let nft_id = Uuid::new_v4().to_string();
         match upload_nft_image(&state, &auth.uid, &nft_id, bytes, &ct).await {
             Ok(image_url) => {
+                // Generate and upload the off-chain Metaplex metadata JSON so the
+                // frontend can pass `metadataUri` straight into Umi's `createNft()`.
+                let metadata_json = json!({
+                    "name":        title,
+                    "symbol":      "",
+                    "description": description,
+                    "image":       image_url,
+                    "attributes":  [{ "trait_type": "Blockchain", "value": "Solana" }],
+                    "properties":  {
+                        "files":    [{ "uri": image_url, "type": ct }],
+                        "category": "image"
+                    }
+                });
+                let metadata_bytes = serde_json::to_vec(&metadata_json)
+                    .map_err(|e| AppError::BadRequest(format!("Failed to serialise metadata: {}", e)))?;
+                let metadata_path = StorageClient::metadata_path(&auth.uid, &nft_id);
+                let metadata_uri = state
+                    .storage
+                    .upload(&metadata_path, metadata_bytes, "application/json")
+                    .await
+                    .map_err(|e| AppError::Firebase(e.to_string()))?;
+
                 let nft = Nft {
                     id: nft_id.clone(),
                     title: title.clone(),
                     description,
-                    image: image_url,
+                    image: image_url.clone(),
                     tags: shared.tags.clone(),
                     category: None,
                     blockchain: Some(shared.blockchain.clone()),
@@ -368,7 +390,7 @@ pub async fn batch_create_nfts(
                     for_sale: shared.for_sale,
                     currency: Some(shared.currency.clone()),
                     created_at: Utc::now().to_rfc3339(),
-                    metadata_uri: None,
+                    metadata_uri: Some(metadata_uri.clone()),
                     mint_address: None,
                     edition_count: None,
                     edition_number: None,
@@ -380,6 +402,8 @@ pub async fn batch_create_nfts(
                     id: Some(nft_id),
                     status: "ok".to_owned(),
                     message: None,
+                    image_url: Some(image_url),
+                    metadata_uri: Some(metadata_uri),
                 });
                 created += 1;
             }
@@ -389,6 +413,8 @@ pub async fn batch_create_nfts(
                     id: None,
                     status: "error".to_owned(),
                     message: Some(e.to_string()),
+                    image_url: None,
+                    metadata_uri: None,
                 });
                 failed += 1;
             }

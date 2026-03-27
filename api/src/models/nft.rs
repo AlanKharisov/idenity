@@ -120,4 +120,10 @@ pub struct BatchItemResult {
     pub id: Option<String>,
     pub status: String,
     pub message: Option<String>,
+    /// Firebase Storage URL of the uploaded image.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+    /// Off-chain Metaplex metadata JSON URL — present on success, absent on error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata_uri: Option<String>,
 }
