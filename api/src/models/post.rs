@@ -35,12 +35,19 @@ pub struct Post {
     pub price: Option<f64>,
     pub currency: Option<String>,
     pub wallet_nft_id: Option<String>,
+    /// Collection posts: all image URLs. Empty on single-NFT posts.
+    #[serde(default)]
+    pub nft_images: Vec<String>,
+    /// Collection posts: all wallet NFT IDs. Empty on single-NFT posts.
+    #[serde(default)]
+    pub wallet_nft_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreatePostRequest {
-    pub nft_image: String,
+    /// Primary image. Optional when `nft_images` is supplied (first element is used as fallback).
+    pub nft_image: Option<String>,
     pub title: String,
     pub description: String,
     #[serde(default)]
@@ -49,6 +56,12 @@ pub struct CreatePostRequest {
     pub price: Option<f64>,
     pub currency: Option<String>,
     pub wallet_nft_id: Option<String>,
+    /// Collection posts only: all image URLs.
+    #[serde(default)]
+    pub nft_images: Vec<String>,
+    /// Collection posts only: all wallet NFT IDs.
+    #[serde(default)]
+    pub wallet_nft_ids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]

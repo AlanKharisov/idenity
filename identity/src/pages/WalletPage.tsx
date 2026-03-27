@@ -115,6 +115,7 @@ const WalletPage: React.FC<WalletPageProps> = ({ onNFTClick, onSellNFT }) => {
                                         <img
                                             src={getNFTImage(nft)}
                                             alt={nft.title}
+                                            loading="lazy"
                                             style={st.nftImg}
                                             onError={e => { e.currentTarget.src = '/img/default-nft.png'; }}
                                         />

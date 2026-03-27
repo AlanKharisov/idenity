@@ -249,6 +249,7 @@ const HomePage: React.FC = () => {
                                 <img
                                     src={post.userAvatar || DEFAULT_AVATAR}
                                     alt="Avatar"
+                                    loading="lazy"
                                     onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = DEFAULT_AVATAR; }}
                                 />
                             </div>
@@ -268,14 +269,50 @@ const HomePage: React.FC = () => {
                         )}
 
                         <div className="nft-content">
-                            <div className="nft-image">
-                                <img
-                                    src={post.nftImage || '/img/default-nft.png'}
-                                    alt={post.title}
-                                    style={{ width: '100%', borderRadius: '12px', objectFit: 'cover', display: 'block' }}
-                                    onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = '/img/default-nft.png'; }}
-                                />
-                            </div>
+                            {(post as any).nftImages?.length > 0 ? (
+                                /* ── Collection gallery (horizontal scroll) ── */
+                                <div style={{ position: 'relative' }}>
+                                    <style>{`::-webkit-scrollbar{display:none}`}</style>
+                                    <div style={{
+                                        display: 'flex', gap: '8px',
+                                        overflowX: 'auto', scrollbarWidth: 'none',
+                                        paddingBottom: '2px',
+                                    }}>
+                                        {(post as any).nftImages.map((src: string, idx: number) => (
+                                            <img
+                                                key={idx}
+                                                src={src || '/img/default-nft.png'}
+                                                alt={`${post.title} #${idx + 1}`}
+                                                loading="lazy"
+                                                style={{
+                                                    width: '160px', height: '160px', flexShrink: 0,
+                                                    borderRadius: '10px', objectFit: 'cover',
+                                                }}
+                                                onError={e => { e.currentTarget.src = '/img/default-nft.png'; }}
+                                            />
+                                        ))}
+                                    </div>
+                                    <div style={{
+                                        position: 'absolute', top: '8px', right: '8px',
+                                        background: 'rgba(0,0,0,0.6)', color: 'white',
+                                        borderRadius: '12px', padding: '2px 8px',
+                                        fontSize: '11px', fontWeight: 'bold', pointerEvents: 'none',
+                                    }}>
+                                        {(post as any).nftImages.length} NFTs
+                                    </div>
+                                </div>
+                            ) : (
+                                /* ── Single NFT image ── */
+                                <div className="nft-image">
+                                    <img
+                                        src={post.nftImage || '/img/default-nft.png'}
+                                        alt={post.title}
+                                        loading="lazy"
+                                        style={{ width: '100%', borderRadius: '12px', objectFit: 'cover', display: 'block' }}
+                                        onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = '/img/default-nft.png'; }}
+                                    />
+                                </div>
+                            )}
                             {(post as any).blockchain && (
                                 <div style={{ padding: '6px 0', fontSize: '12px', color: '#888', display: 'flex', gap: '10px' }}>
                                     <span>⛓ {(post as any).blockchain}</span>
@@ -333,6 +370,7 @@ const HomePage: React.FC = () => {
                                                 <img
                                                     src={comment.userAvatar || DEFAULT_AVATAR}
                                                     alt="Avatar"
+                                                    loading="lazy"
                                                     onError={e => { e.currentTarget.onerror = null; e.currentTarget.src = DEFAULT_AVATAR; }}
                                                 />
                                             </div>

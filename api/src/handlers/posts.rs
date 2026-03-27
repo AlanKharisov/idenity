@@ -68,12 +68,17 @@ pub async fn create_post(
         .and_then(|v| v.as_str())
         .map(str::to_owned);
 
+    // For collection posts the caller may omit nft_image and rely on nft_images[0].
+    let primary_image = body.nft_image
+        .or_else(|| body.nft_images.first().cloned())
+        .unwrap_or_default();
+
     let post = Post {
         id: String::new(), // will be set after Firestore assigns ID
         user_id: auth.uid.clone(),
         user_name,
         user_avatar,
-        nft_image: body.nft_image,
+        nft_image: primary_image,
         title: body.title,
         description: body.description,
         tags: body.tags,
@@ -85,6 +90,8 @@ pub async fn create_post(
         price: body.price,
         currency: body.currency,
         wallet_nft_id: body.wallet_nft_id,
+        nft_images: body.nft_images,
+        wallet_nft_ids: body.wallet_nft_ids,
     };
 
     let mut value = serde_json::to_value(&post).map_err(|e| AppError::Internal(e.into()))?;

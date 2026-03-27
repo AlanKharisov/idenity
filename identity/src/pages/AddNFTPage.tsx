@@ -17,6 +17,35 @@ const BLOCKCHAINS = [
     { id: 'solana', name: 'Solana', icon: '◎', currency: 'SOL', fee: '~$0.01' },
 ];
 
+// ─── Image compression ────────────────────────────────────────────────────────
+// Resizes to ≤ maxPx on the longest edge and re-encodes as JPEG.
+// Falls back to the original file if the Canvas API is unavailable.
+function compressImage(file: File, maxPx = 1080, quality = 0.8): Promise<File> {
+    return new Promise(resolve => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+            const scale  = Math.min(1, maxPx / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width  = Math.round(img.width  * scale);
+            canvas.height = Math.round(img.height * scale);
+            canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+            canvas.toBlob(
+                blob => {
+                    if (!blob) { resolve(file); return; }
+                    const name = file.name.replace(/\.[^.]+$/, '.jpg');
+                    resolve(new File([blob], name, { type: 'image/jpeg' }));
+                },
+                'image/jpeg',
+                quality,
+            );
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); resolve(file); };
+        img.src = url;
+    });
+}
+
 type Step = 1 | 2 | 3;
 type Mode = 'create' | 'wallet' | 'batch';
 
@@ -177,13 +206,17 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     description: description.trim(),
                     ...(forSale && price ? { price: parseFloat(price) } : {}),
                 }));
+                setUploadProgress(`Step 1/${totalItems + 3} — Compressing ${totalItems} images…`);
+                const compressedFiles = await Promise.all(collectionFiles.map(f => compressImage(f)));
+
                 const form = new FormData();
-                collectionFiles.forEach(f => form.append('images[]', f));
+                compressedFiles.forEach(f => form.append('images[]', f));
                 form.append('metadata', JSON.stringify({
                     blockchain, currency,
                     royalty: parseFloat(royalty),
                     forSale, tags, items,
                 }));
+                setUploadProgress(`Step 1/${totalItems + 3} — Uploading ${totalItems} images to backend…`);
                 const collectionResult = await apiBatchCreate(form);
                 if (collectionResult?.failed > 0) {
                     console.warn('[AddNFT] Collection batch had upload failures:', collectionResult);
@@ -204,7 +237,11 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 // Subsequent items in the same upload are free of the platform fee.
                 let feeCharged = false;
 
-                // ── Steps 2..N+1 — Mint each item on-chain, record, then post ─────
+                // Accumulate image URLs and NFT IDs for the single collection post.
+                const collectionImageUrls: string[] = [];
+                const collectionNftIds:    string[] = [];
+
+                // ── Steps 2..N+1 — Mint each item on-chain, record immediately ────
                 // Fresh blockhash fetched per iteration to prevent TTL expiry when
                 // the collection is large and each Phantom approval takes time.
                 for (let i = 0; i < successful.length; i++) {
@@ -248,22 +285,27 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     setUploadProgress(`Step ${stepNum}/${stepTotal} — Recording item ${i + 1}/${successful.length}…`);
                     await apiUpdateNFT(item.id, { mintAddress: mint.publicKey });
 
-                    // Publish each item individually so the full collection appears in the feed.
-                    setUploadProgress(`Step ${stepNum}/${stepTotal} — Publishing item ${i + 1}/${successful.length} to feed…`);
-                    await apiCreatePost({
-                        nftImage:    item.imageUrl,
-                        title:       itemTitle,
-                        description: description.trim(),
-                        tags,
-                        forSale,
-                        price:       forSale && price ? parseFloat(price) : null,
-                        currency,
-                        walletNftId: item.id,
-                    });
-                    console.log(`[AddNFT] collection item ${i + 1} posted to feed.`);
+                    collectionImageUrls.push(item.imageUrl as string);
+                    collectionNftIds.push(item.id    as string);
                 }
 
-                console.log(`[AddNFT] collection flow complete — ${successful.length} items minted.`);
+                // ── Single collection post after all mints complete ───────────────
+                // One post represents the whole collection in the feed; individual
+                // NFT records remain in the wallet as separate items.
+                const collectionStepNum = successful.length + 2;
+                const collectionStepTotal = successful.length + 3;
+                setUploadProgress(`Step ${collectionStepNum}/${collectionStepTotal} — Publishing collection to feed…`);
+                await apiCreatePost({
+                    nftImages:    collectionImageUrls,
+                    walletNftIds: collectionNftIds,
+                    title:        collectionName.trim() || title.trim(),
+                    description:  description.trim(),
+                    tags,
+                    forSale,
+                    price:        forSale && price ? parseFloat(price) : null,
+                    currency,
+                });
+                console.log(`[AddNFT] collection flow complete — ${successful.length} items minted, 1 feed post created.`);
 
             } else {
                 const numEditions = Math.max(1, parseInt(editionCount) || 1);
@@ -291,11 +333,11 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 if (numEditions > 1) {
                     // ══ Multi-edition path (Master Edition + N Print Editions) ══════
 
-                    // Step 1/5 ── Upload to backend.
+                    // Step 1/5 ── Compress + upload to backend.
                     // Creates: 1 master Firestore record + N placeholder edition records.
-                    setUploadProgress(`Step 1/5 — Uploading metadata for ${numEditions} editions…`);
+                    setUploadProgress(`Step 1/5 — Compressing & uploading image…`);
                     const editionForm = new FormData();
-                    editionForm.append('image',    selectedFile!);
+                    editionForm.append('image',    await compressImage(selectedFile!));
                     editionForm.append('metadata', JSON.stringify({ ...baseMetadata, editionCount: numEditions }));
                     const edResult = await apiCreateEditionNFTs(editionForm);
                     const { masterId, metadataUri, imageUrl, editionIds } = edResult;
@@ -377,10 +419,10 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 } else {
                     // ══ Single NFT — 4-step on-chain mint ══════════════════════════
 
-                    // Step 1/4 ── Upload image + metadata to backend.
-                    setUploadProgress('Step 1/4 — Uploading image & metadata…');
+                    // Step 1/4 ── Compress + upload image + metadata to backend.
+                    setUploadProgress('Step 1/4 — Compressing & uploading image…');
                     const form = new FormData();
-                    form.append('image',    selectedFile!);
+                    form.append('image',    await compressImage(selectedFile!));
                     form.append('metadata', JSON.stringify(baseMetadata));
                     const result = await apiCreateNFT(form);
                     console.log('[AddNFT] single NFT backend record created:', result?.id);
@@ -526,8 +568,9 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 tags:       batchTags,
                 items,
             };
+            const batchCompressed = await Promise.all(batchFiles.map(f => compressImage(f)));
             const form = new FormData();
-            batchFiles.forEach(f => form.append('images[]', f));
+            batchCompressed.forEach(f => form.append('images[]', f));
             form.append('metadata', JSON.stringify(metadata));
 
             const result = await apiBatchCreate(form);
