@@ -74,6 +74,33 @@ async fn upload_nft_image(
 
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
+/// `GET /api/nfts/mint-info`
+/// Returns the caller's lifetime mint count and whether this next mint will
+/// incur a platform commission (kicks in from the 4th mint onward).
+/// Commission = 1 % of the typical Metaplex mint cost (~0.012 SOL ≈ 12 000 000 lamports).
+pub async fn get_mint_info(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let doc = state
+        .firestore
+        .get("marki_wallets", &auth.uid)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?
+        .unwrap_or_else(|| json!({}));
+
+    let mint_count = doc.get("mintCount").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    // First 3 mints are free (only gas). Commission starts on the 4th.
+    let commission_lamports: u64 = if mint_count >= 3 { 120_000 } else { 0 };
+
+    Ok(Json(json!({
+        "mintCount":          mint_count,
+        "isFree":             mint_count < 3,
+        "commissionLamports": commission_lamports,
+    })))
+}
+
 /// `GET /api/nfts`
 pub async fn get_nfts(
     State(state): State<Arc<AppState>>,
@@ -212,6 +239,21 @@ pub async fn create_nft(
     let mut nfts = load_nfts(&state, &auth.uid).await?;
     nfts.push(nft.clone());
     save_nfts(&state, &auth.uid, &nfts).await?;
+
+    // Increment the lifetime mint counter (freemium gate tracked here).
+    // Non-fatal: a failure should not block the successful mint response.
+    let wallet_doc = state
+        .firestore
+        .get("marki_wallets", &auth.uid)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| json!({}));
+    let new_count = wallet_doc.get("mintCount").and_then(|v| v.as_u64()).unwrap_or(0) + 1;
+    let _ = state
+        .firestore
+        .update("marki_wallets", &auth.uid, &json!({ "mintCount": new_count }))
+        .await;
 
     notification_helpers::notify_nft_created(&state.firestore, &auth.uid, &req.title).await;
 
