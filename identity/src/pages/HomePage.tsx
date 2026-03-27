@@ -1,8 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { formatTime } from '../utils/formatters';
 import { usePosts } from '../hooks/usePosts';
 import { useAuth } from '../context/AuthContext';
 import BuyModal from './BuyModal';
+import HistoryView from './HistoryView';
+import { useViewHistory } from '../hooks/useViewHistory';
 
 const DEFAULT_AVATAR = '/img/default-avatar.png';
 
@@ -19,10 +21,15 @@ const HomePage: React.FC = () => {
 
     // ── Hamburger menu ────────────────────────────────────────────────────────
     const [hamburgerOpen, setHamburgerOpen] = useState(false);
+    // ── History panel ─────────────────────────────────────────────────────────
+    const [historyOpen, setHistoryOpen]     = useState(false);
     // ── Filter menu ───────────────────────────────────────────────────────────
     const [filterOpen, setFilterOpen]       = useState(false);
     const [activeFilter, setActiveFilter]   = useState('All');
     const filterRef = useRef<HTMLDivElement>(null);
+
+    // ── View history (IntersectionObserver) ───────────────────────────────────
+    const { attachObserver } = useViewHistory();
 
     // Close filter dropdown when clicking outside
     useEffect(() => {
@@ -124,6 +131,42 @@ const HomePage: React.FC = () => {
                                 )}
                             </div>
                         ))}
+
+                        {/* ── History tab (divider + entry) ── */}
+                        <div style={st.drawerDivider} />
+                        <div
+                            className="drawer-item-hover"
+                            style={st.drawerItem}
+                            onClick={() => { setHistoryOpen(true); setHamburgerOpen(false); }}
+                        >
+                            <span style={{ marginRight: '12px', fontSize: '18px' }}>🕐</span>
+                            <span style={{ fontSize: '15px' }}>View History</span>
+                            <span style={{ marginLeft: 'auto', fontSize: '11px', color: '#bbb' }}>›</span>
+                        </div>
+                    </div>
+                </>
+            )}
+
+            {/* ── History panel (separate slide-over, reuses drawer styles) ── */}
+            {historyOpen && (
+                <>
+                    <div
+                        style={{ ...st.drawerOverlay, animation: 'fadeInOverlay 0.2s ease' }}
+                        onClick={() => setHistoryOpen(false)}
+                    />
+                    <div style={{ ...st.drawer, animation: 'slideInDrawer 0.25s ease' }}>
+                        <div style={st.drawerHeader}>
+                            <button
+                                style={{ ...st.drawerClose, marginRight: '10px' }}
+                                onClick={() => { setHistoryOpen(false); setHamburgerOpen(true); }}
+                                aria-label="Back to menu"
+                            >
+                                ‹
+                            </button>
+                            <span style={st.drawerTitle}>View History</span>
+                            <button style={st.drawerClose} onClick={() => setHistoryOpen(false)}>✕</button>
+                        </div>
+                        <HistoryView onClose={() => setHistoryOpen(false)} />
                     </div>
                 </>
             )}
@@ -195,7 +238,11 @@ const HomePage: React.FC = () => {
                 </div>
             ) : (
                 filteredPosts.map(post => (
-                    <div key={post.id} className="nft-post">
+                    <div
+                        key={post.id}
+                        className="nft-post"
+                        ref={el => { if (el && post.id) attachObserver(el, post.id); }}
+                    >
 
                         <div className="user-info">
                             <div className="avatar">
@@ -392,6 +439,11 @@ const st: any = {
     hamburgerLine: {
         display: 'block', width: '100%', height: '2px',
         background: '#333', borderRadius: '2px',
+    },
+    drawerDivider: {
+        height: '1px',
+        background: '#ebebeb',
+        margin: '4px 0',
     },
 };
 

@@ -1,9 +1,9 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { apiCreateNFT, apiUpdateNFT, apiGetNFTs, apiCreatePost, apiDeletePost, apiBatchCreate, apiGetPosts, apiGetMintInfo } from '../services/apiClient';
+import { apiCreateNFT, apiUpdateNFT, apiGetNFTs, apiCreatePost, apiDeletePost, apiBatchCreate, apiGetPosts, apiGetMintInfo, apiCreateEditionNFTs } from '../services/apiClient';
 import { useUmi } from '../hooks/useUmi';
-import { generateSigner, percentAmount, lamports, publicKey as umiPublicKey } from '@metaplex-foundation/umi';
-import { createNft } from '@metaplex-foundation/mpl-token-metadata';
+import { generateSigner, percentAmount, lamports, publicKey as umiPublicKey, some } from '@metaplex-foundation/umi';
+import { createNft, printV1, TokenStandard } from '@metaplex-foundation/mpl-token-metadata';
 import { transferSol } from '@metaplex-foundation/mpl-toolbox';
 
 // ─── Platform treasury ────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
     const [currency, setCurrency]             = useState('SOL');
     const [blockchain, setBlockchain]         = useState('solana');
     const [royalty, setRoyalty]               = useState('10');
+    const [editionCount, setEditionCount]     = useState('1'); // '1' = regular 1-of-1
     // Collection creation
     const [isCollection, setIsCollection]     = useState(false);
     const [collectionName, setCollectionName] = useState('');
@@ -167,13 +168,10 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     console.warn('[AddNFT] Collection batch failures:', collectionResult);
                 }
             } else {
-                // ── Single NFT — three-step on-chain mint ─────────────────────────
                 if (!selectedFile) { alert('Please select an image'); return; }
 
-                // Step 1 — Upload image + metadata JSON to backend / Firebase Storage.
-                // Backend returns the NFT record including the off-chain metadataUri.
-                setUploadProgress('Step 1/4 — Uploading image & metadata…');
-                const metadata: any = {
+                const numEditions = Math.max(1, parseInt(editionCount) || 1);
+                const baseMetadata: any = {
                     title:       title.trim(),
                     description: description.trim(),
                     tags,
@@ -183,76 +181,169 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     forSale,
                     currency,
                 };
-                if (forSale && price) metadata.price = parseFloat(price);
-                const form = new FormData();
-                form.append('image',    selectedFile);
-                form.append('metadata', JSON.stringify(metadata));
-                const result = await apiCreateNFT(form);
+                if (forSale && price) baseMetadata.price = parseFloat(price);
 
-                const nftId       = result?.id;
-                const metadataUri = result?.metadataUri;
-                if (!nftId || !metadataUri) {
-                    throw new Error('Backend did not return id / metadataUri — check Rust handler.');
-                }
+                if (numEditions > 1) {
+                    // ══ Multi-edition path ══════════════════════════════════════════
 
-                // Step 2 — Mint on Solana Devnet via Umi (freemium model).
-                // Check mint count first so the user sees accurate messaging before
-                // Phantom opens. Blockhash is fetched right after to maximise TTL.
-                setUploadProgress('Step 2/4 — Checking mint fee…');
-                const mintInfo = await apiGetMintInfo();
+                    // Step 1/5 — Upload to backend → creates master + N placeholder records.
+                    setUploadProgress(`Step 1/5 — Uploading metadata for ${numEditions} editions…`);
+                    const editionForm = new FormData();
+                    editionForm.append('image',    selectedFile);
+                    editionForm.append('metadata', JSON.stringify({ ...baseMetadata, editionCount: numEditions }));
+                    const edResult = await apiCreateEditionNFTs(editionForm);
+                    const { masterId, metadataUri, imageUrl, editionIds } = edResult;
 
-                setUploadProgress(
-                    mintInfo.isFree
-                        ? 'Step 2/4 — Minting (free tier) — approve in Phantom…'
-                        : 'Step 2/4 — Minting (+ platform fee) — approve in Phantom…'
-                );
-
-                const mint              = generateSigner(umi);
-                const latestBlockhash   = await umi.rpc.getLatestBlockhash();
-
-                // Build the base NFT mint instruction.
-                let txBuilder = createNft(umi, {
-                    mint,
-                    name:                 title.trim(),
-                    uri:                  metadataUri,
-                    sellerFeeBasisPoints: percentAmount(parseFloat(royalty)),
-                });
-
-                // Append platform commission from the 4th mint onward.
-                // The listing price is NEVER charged here — it is metadata only.
-                if (!mintInfo.isFree && mintInfo.commissionLamports > 0) {
-                    txBuilder = txBuilder.add(
-                        transferSol(umi, {
-                            destination: PLATFORM_TREASURY,
-                            amount:      lamports(mintInfo.commissionLamports),
-                        })
+                    // Step 2/5 — Check freemium tier, then mint the Master Edition on-chain.
+                    setUploadProgress('Step 2/5 — Checking mint fee…');
+                    const mintInfo = await apiGetMintInfo();
+                    setUploadProgress(
+                        mintInfo.isFree
+                            ? 'Step 2/5 — Minting Master Edition (free tier) — approve in Phantom…'
+                            : 'Step 2/5 — Minting Master Edition (+ platform fee) — approve in Phantom…'
                     );
-                }
 
-                await txBuilder
-                    .setBlockhash(latestBlockhash)
-                    .sendAndConfirm(umi, {
-                        confirm: { strategy: { type: 'blockhash', ...latestBlockhash } },
+                    const masterMint     = generateSigner(umi);
+                    const masterBlockhash = await umi.rpc.getLatestBlockhash();
+
+                    let masterTx = createNft(umi, {
+                        mint:                 masterMint,
+                        name:                 title.trim(),
+                        uri:                  metadataUri,
+                        sellerFeeBasisPoints: percentAmount(parseFloat(royalty)),
+                        // maxSupply = N tells the program exactly N prints are allowed.
+                        maxSupply:            some(BigInt(numEditions)),
                     });
 
-                const mintAddress = mint.publicKey; // PublicKey is a base-58 string in Umi v1
+                    if (!mintInfo.isFree && mintInfo.commissionLamports > 0) {
+                        masterTx = masterTx.add(
+                            transferSol(umi, {
+                                destination: PLATFORM_TREASURY,
+                                amount:      lamports(mintInfo.commissionLamports),
+                            })
+                        );
+                    }
 
-                // Step 3 — Persist the on-chain mint address back to Firestore.
-                setUploadProgress('Step 3/4 — Recording on-chain identity…');
-                await apiUpdateNFT(nftId, { mintAddress });
+                    await masterTx
+                        .setBlockhash(masterBlockhash)
+                        .sendAndConfirm(umi, {
+                            confirm: { strategy: { type: 'blockhash', ...masterBlockhash } },
+                        });
 
-                // Step 4 — Create a feed post so the NFT appears on the home page.
-                setUploadProgress('Step 4/4 — Publishing to feed…');
-                await apiCreatePost({
-                    nftImage:    result.image,
-                    title:       title.trim(),
-                    description: description.trim(),
-                    tags,
-                    forSale,
-                    price:       forSale && price ? parseFloat(price) : null,
-                    currency,
-                    walletNftId: nftId,
-                });
+                    await apiUpdateNFT(masterId, { mintAddress: masterMint.publicKey });
+
+                    // Step 3/5 — Print each edition on-chain.
+                    // A fresh blockhash is fetched per iteration so the ~90 s TTL
+                    // never expires during large multi-mints (e.g. 10+ editions).
+                    for (let i = 0; i < numEditions; i++) {
+                        setUploadProgress(
+                            `Step 3/5 — Printing edition ${i + 1} of ${numEditions} — approve in Phantom…`
+                        );
+
+                        const editionMint      = generateSigner(umi);
+                        const editionBlockhash = await umi.rpc.getLatestBlockhash();
+
+                        await printV1(umi, {
+                            masterTokenAccountOwner:  umi.identity,
+                            masterEditionMint:        masterMint.publicKey,
+                            editionMint,
+                            editionTokenAccountOwner: umi.identity.publicKey,
+                            editionNumber:            BigInt(i + 1),
+                            tokenStandard:            TokenStandard.NonFungible,
+                        })
+                        .setBlockhash(editionBlockhash)
+                        .sendAndConfirm(umi, {
+                            confirm: { strategy: { type: 'blockhash', ...editionBlockhash } },
+                        });
+
+                        // Step 4/5 — Record this print's on-chain address immediately.
+                        setUploadProgress(
+                            `Step 4/5 — Recording edition ${i + 1} of ${numEditions}…`
+                        );
+                        await apiUpdateNFT(editionIds[i], { mintAddress: editionMint.publicKey });
+                    }
+
+                    // Step 5/5 — Publish one feed post for the whole series.
+                    setUploadProgress('Step 5/5 — Publishing to feed…');
+                    await apiCreatePost({
+                        nftImage:    imageUrl,
+                        title:       `${title.trim()} (${numEditions} editions)`,
+                        description: description.trim(),
+                        tags,
+                        forSale,
+                        price:       forSale && price ? parseFloat(price) : null,
+                        currency,
+                        walletNftId: masterId,
+                    });
+
+                } else {
+                    // ══ Single NFT — 4-step on-chain mint ══════════════════════════
+
+                    // Step 1/4 — Upload image + metadata to backend.
+                    setUploadProgress('Step 1/4 — Uploading image & metadata…');
+                    const form = new FormData();
+                    form.append('image',    selectedFile);
+                    form.append('metadata', JSON.stringify(baseMetadata));
+                    const result = await apiCreateNFT(form);
+
+                    const nftId       = result?.id;
+                    const metadataUri = result?.metadataUri;
+                    if (!nftId || !metadataUri) {
+                        throw new Error('Backend did not return id / metadataUri — check Rust handler.');
+                    }
+
+                    // Step 2/4 — Check freemium tier, fetch a fresh blockhash immediately
+                    // after the upload resolves to maximise the ~90 s TTL window.
+                    setUploadProgress('Step 2/4 — Checking mint fee…');
+                    const mintInfo = await apiGetMintInfo();
+                    setUploadProgress(
+                        mintInfo.isFree
+                            ? 'Step 2/4 — Minting (free tier) — approve in Phantom…'
+                            : 'Step 2/4 — Minting (+ platform fee) — approve in Phantom…'
+                    );
+
+                    const mint            = generateSigner(umi);
+                    const latestBlockhash = await umi.rpc.getLatestBlockhash();
+
+                    let txBuilder = createNft(umi, {
+                        mint,
+                        name:                 title.trim(),
+                        uri:                  metadataUri,
+                        sellerFeeBasisPoints: percentAmount(parseFloat(royalty)),
+                    });
+
+                    if (!mintInfo.isFree && mintInfo.commissionLamports > 0) {
+                        txBuilder = txBuilder.add(
+                            transferSol(umi, {
+                                destination: PLATFORM_TREASURY,
+                                amount:      lamports(mintInfo.commissionLamports),
+                            })
+                        );
+                    }
+
+                    await txBuilder
+                        .setBlockhash(latestBlockhash)
+                        .sendAndConfirm(umi, {
+                            confirm: { strategy: { type: 'blockhash', ...latestBlockhash } },
+                        });
+
+                    // Step 3/4 — Persist on-chain mint address.
+                    setUploadProgress('Step 3/4 — Recording on-chain identity…');
+                    await apiUpdateNFT(nftId, { mintAddress: mint.publicKey });
+
+                    // Step 4/4 — Publish to feed.
+                    setUploadProgress('Step 4/4 — Publishing to feed…');
+                    await apiCreatePost({
+                        nftImage:    result.image,
+                        title:       title.trim(),
+                        description: description.trim(),
+                        tags,
+                        forSale,
+                        price:       forSale && price ? parseFloat(price) : null,
+                        currency,
+                        walletNftId: nftId,
+                    });
+                }
             }
             setUploadProgress('');
             setSuccess(true);

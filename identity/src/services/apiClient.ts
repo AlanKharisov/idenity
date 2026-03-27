@@ -91,7 +91,14 @@ export const apiGetNFTs   = ()                            => get<any[]>('/api/nf
 export const apiCreateNFT = (form: FormData)              => postForm<any>('/api/nfts', form);
 export const apiUpdateNFT = (id: string, d: any)          => put<any>(`/api/nfts/${id}`, d);
 export const apiDeleteNFT = (id: string)                  => del<any>(`/api/nfts/${id}`);
-export const apiBatchCreate = (form: FormData)             => postForm<any>('/api/nfts/batch', form);
+export const apiBatchCreate = (form: FormData)            => postForm<any>('/api/nfts/batch', form);
+export const apiCreateEditionNFTs = (form: FormData)      => postForm<{
+    masterId:     string;
+    metadataUri:  string;
+    imageUrl:     string;
+    editionIds:   string[];
+    editionCount: number;
+}>('/api/nfts/editions', form);
 
 // ── Posts ─────────────────────────────────────────────────────────────────────
 export const apiGetPosts   = ()                           => get<any[]>('/api/posts');

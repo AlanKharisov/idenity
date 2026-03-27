@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     errors::{ApiResult, AppError},
     middleware::auth::AuthenticatedUser,
-    models::{BatchItemResult, BatchNftInput, BatchUploadResponse, CreateNftRequest, Nft, UpdateNftRequest},
+    models::{BatchItemResult, BatchNftInput, BatchUploadResponse, CreateEditionResponse, CreateNftRequest, Nft, UpdateNftRequest},
     notification_helpers,
     services::StorageClient,
     AppState,
@@ -442,4 +442,166 @@ pub async fn delete_nft(
 
     save_nfts(&state, &auth.uid, &nfts).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `POST /api/nfts/editions`
+///
+/// Creates one Master Edition NFT record plus N print-edition placeholder
+/// records in Firestore, all sharing a single uploaded image and metadata JSON.
+///
+/// The frontend is responsible for the on-chain work:
+///   1. `createNft(…, { maxSupply: some(N) })` — registers the Master Edition.
+///   2. `printV1(…)` × N                       — mints each print edition.
+///   3. `PUT /api/nfts/:id { mintAddress }`     — saves each on-chain address.
+///
+/// Multipart body: `image` (file) + `metadata` (JSON, must include `editionCount`).
+pub async fn create_edition_nfts(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+    mut multipart: Multipart,
+) -> ApiResult<(StatusCode, Json<CreateEditionResponse>)> {
+    let mut image_bytes: Option<Vec<u8>> = None;
+    let mut image_ct = "image/jpeg".to_owned();
+    let mut meta: Option<CreateNftRequest> = None;
+
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|e| AppError::BadRequest(e.to_string()))?
+    {
+        let name = field.name().unwrap_or("").to_owned();
+        match name.as_str() {
+            "image" => {
+                image_ct    = field.content_type().unwrap_or("image/jpeg").to_owned();
+                image_bytes = Some(
+                    field.bytes().await
+                        .map_err(|e| AppError::BadRequest(e.to_string()))?.to_vec(),
+                );
+            }
+            "metadata" => {
+                let text = field.text().await
+                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
+                meta = Some(
+                    serde_json::from_str(text.trim())
+                        .map_err(|e| AppError::BadRequest(format!("Invalid metadata JSON: {}", e)))?,
+                );
+            }
+            _ => { let _ = field.bytes().await; }
+        }
+    }
+
+    let bytes = image_bytes
+        .ok_or_else(|| AppError::BadRequest("Missing 'image' field".into()))?;
+    let req   = meta
+        .ok_or_else(|| AppError::BadRequest("Missing 'metadata' field".into()))?;
+
+    // edition_count must be ≥ 2 for this endpoint to make sense.
+    let edition_count = req.edition_count
+        .filter(|&n| n >= 2)
+        .ok_or_else(|| AppError::BadRequest(
+            "Field 'editionCount' must be an integer ≥ 2".into()
+        ))?
+        .min(100); // hard cap: 100 editions per request
+
+    // Fetch owner display name.
+    let user_doc  = state.firestore.get("users", &auth.uid).await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+    let owner_name = user_doc.as_ref()
+        .and_then(|d| d.get("name")).and_then(|v| v.as_str())
+        .unwrap_or("Unknown").to_owned();
+
+    // Upload the shared image once.
+    let master_id = Uuid::new_v4().to_string();
+    let image_url = upload_nft_image(&state, &auth.uid, &master_id, bytes, &image_ct).await?;
+
+    // Build and upload the shared off-chain metadata JSON.
+    let metadata_json = json!({
+        "name":        req.title,
+        "symbol":      "",
+        "description": req.description,
+        "image":       image_url,
+        "attributes": [
+            { "trait_type": "Category",    "value": req.category.as_deref().unwrap_or("Art") },
+            { "trait_type": "Blockchain",  "value": "Solana" },
+            { "trait_type": "Edition",     "value": format!("1 of {}", edition_count) }
+        ],
+        "properties": {
+            "files":    [{ "uri": image_url, "type": image_ct }],
+            "category": "image"
+        }
+    });
+    let metadata_bytes = serde_json::to_vec(&metadata_json)
+        .map_err(|e| AppError::BadRequest(e.to_string()))?;
+    let metadata_path = StorageClient::metadata_path(&auth.uid, &master_id);
+    let metadata_uri  = state.storage
+        .upload(&metadata_path, metadata_bytes, "application/json")
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+
+    let now = Utc::now().to_rfc3339();
+
+    // ── Master Edition record (edition_number = 0) ─────────────────────────────
+    let master = Nft {
+        id:             master_id.clone(),
+        title:          req.title.clone(),
+        description:    req.description.clone(),
+        image:          image_url.clone(),
+        tags:           req.tags.clone(),
+        category:       req.category.clone(),
+        blockchain:     Some(req.blockchain.clone()),
+        royalty:        Some(req.royalty),
+        owner_id:       auth.uid.clone(),
+        owner_name:     owner_name.clone(),
+        price:          req.price,
+        for_sale:       req.for_sale,
+        currency:       Some(req.currency.clone()),
+        created_at:     now.clone(),
+        metadata_uri:   Some(metadata_uri.clone()),
+        mint_address:   None,
+        edition_count:  Some(edition_count),
+        edition_number: Some(0),
+        master_nft_id:  None,
+    };
+
+    // ── Print-edition placeholder records (edition_number = 1..N) ─────────────
+    let mut edition_ids: Vec<String> = Vec::with_capacity(edition_count as usize);
+    let mut all_nfts = load_nfts(&state, &auth.uid).await?;
+    all_nfts.push(master.clone());
+
+    for n in 1..=edition_count {
+        let eid = Uuid::new_v4().to_string();
+        edition_ids.push(eid.clone());
+        all_nfts.push(Nft {
+            id:             eid,
+            title:          format!("{} #{}", req.title, n),
+            edition_number: Some(n),
+            master_nft_id:  Some(master_id.clone()),
+            // Inherit everything else from master
+            mint_address:   None,
+            edition_count:  None, // only master carries the total
+            ..master.clone()
+        });
+    }
+
+    save_nfts(&state, &auth.uid, &all_nfts).await?;
+
+    // Increment lifetime mint counter (non-fatal).
+    let wallet_doc = state.firestore.get("marki_wallets", &auth.uid).await
+        .ok().flatten().unwrap_or_else(|| json!({}));
+    let new_count = wallet_doc.get("mintCount").and_then(|v| v.as_u64()).unwrap_or(0) + 1;
+    let _ = state.firestore
+        .update("marki_wallets", &auth.uid, &json!({ "mintCount": new_count }))
+        .await;
+
+    notification_helpers::notify_nft_created(&state.firestore, &auth.uid, &req.title).await;
+
+    Ok((StatusCode::CREATED, Json(CreateEditionResponse {
+        master_id,
+        metadata_uri,
+        image_url,
+        edition_ids,
+        edition_count,
+    })))
 }
