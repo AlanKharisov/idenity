@@ -234,6 +234,9 @@ pub async fn create_nft(
         created_at: Utc::now().to_rfc3339(),
         metadata_uri: Some(metadata_uri),
         mint_address: None,
+        edition_count: None,
+        edition_number: None,
+        master_nft_id: None,
     };
 
     let mut nfts = load_nfts(&state, &auth.uid).await?;
@@ -367,6 +370,9 @@ pub async fn batch_create_nfts(
                     created_at: Utc::now().to_rfc3339(),
                     metadata_uri: None,
                     mint_address: None,
+                    edition_count: None,
+                    edition_number: None,
+                    master_nft_id: None,
                 };
                 nfts.push(nft);
                 results.push(BatchItemResult {
