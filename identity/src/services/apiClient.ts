@@ -1,6 +1,6 @@
 import { auth } from '../firebase/config';
 
-const BASE_URL = 'http://localhost:8081';
+const BASE_URL = 'https://idenity-backend.duckdns.org'; // Ваш публічний IP сервера AWS
 
 async function getToken(): Promise<string | null> {
     try {
@@ -81,6 +81,12 @@ export const apiRemoveCryptoWallet  = (id: string)        => del<any>(`/api/wall
 export const apiRefreshWalletBalance = (id: string)       => put<any>(`/api/wallets/crypto/${id}/balance`);
 
 // ── NFTs ──────────────────────────────────────────────────────────────────────
+export const apiGetMintInfo = () => get<{
+    mintCount:          number;
+    isFree:             boolean;
+    commissionLamports: number;
+}>('/api/nfts/mint-info');
+
 export const apiGetNFTs   = ()                            => get<any[]>('/api/nfts');
 export const apiCreateNFT = (form: FormData)              => postForm<any>('/api/nfts', form);
 export const apiUpdateNFT = (id: string, d: any)          => put<any>(`/api/nfts/${id}`, d);

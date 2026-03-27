@@ -1,9 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { apiCreateNFT, apiUpdateNFT, apiGetNFTs, apiCreatePost, apiDeletePost, apiBatchCreate, apiGetPosts } from '../services/apiClient';
+import { apiCreateNFT, apiUpdateNFT, apiGetNFTs, apiCreatePost, apiDeletePost, apiBatchCreate, apiGetPosts, apiGetMintInfo } from '../services/apiClient';
 import { useUmi } from '../hooks/useUmi';
-import { generateSigner, percentAmount } from '@metaplex-foundation/umi';
+import { generateSigner, percentAmount, lamports, publicKey as umiPublicKey } from '@metaplex-foundation/umi';
 import { createNft } from '@metaplex-foundation/mpl-token-metadata';
+import { transferSol } from '@metaplex-foundation/mpl-toolbox';
+
+// ─── Platform treasury ────────────────────────────────────────────────────────
+// TODO: replace with your real treasury wallet before going to mainnet.
+const PLATFORM_TREASURY = umiPublicKey('2wZ2vKzRzY7ZxkRTRgTKVBDBVTqk1NfvGbQFgDxJAr9X');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const CATEGORIES  = ['Art', 'Music', 'Photography', 'Gaming', '3D', 'Collectible', 'Sports', 'Meme'];
@@ -167,7 +172,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
 
                 // Step 1 — Upload image + metadata JSON to backend / Firebase Storage.
                 // Backend returns the NFT record including the off-chain metadataUri.
-                setUploadProgress('Step 1/3 — Uploading image & metadata…');
+                setUploadProgress('Step 1/4 — Uploading image & metadata…');
                 const metadata: any = {
                     title:       title.trim(),
                     description: description.trim(),
@@ -190,21 +195,64 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     throw new Error('Backend did not return id / metadataUri — check Rust handler.');
                 }
 
-                // Step 2 — Mint on Solana Devnet via Umi.
-                setUploadProgress('Step 2/3 — Minting on Solana Devnet (approve in Phantom)…');
-                const mint = generateSigner(umi);
-                await createNft(umi, {
+                // Step 2 — Mint on Solana Devnet via Umi (freemium model).
+                // Check mint count first so the user sees accurate messaging before
+                // Phantom opens. Blockhash is fetched right after to maximise TTL.
+                setUploadProgress('Step 2/4 — Checking mint fee…');
+                const mintInfo = await apiGetMintInfo();
+
+                setUploadProgress(
+                    mintInfo.isFree
+                        ? 'Step 2/4 — Minting (free tier) — approve in Phantom…'
+                        : 'Step 2/4 — Minting (+ platform fee) — approve in Phantom…'
+                );
+
+                const mint              = generateSigner(umi);
+                const latestBlockhash   = await umi.rpc.getLatestBlockhash();
+
+                // Build the base NFT mint instruction.
+                let txBuilder = createNft(umi, {
                     mint,
                     name:                 title.trim(),
                     uri:                  metadataUri,
                     sellerFeeBasisPoints: percentAmount(parseFloat(royalty)),
-                }).sendAndConfirm(umi);
+                });
+
+                // Append platform commission from the 4th mint onward.
+                // The listing price is NEVER charged here — it is metadata only.
+                if (!mintInfo.isFree && mintInfo.commissionLamports > 0) {
+                    txBuilder = txBuilder.add(
+                        transferSol(umi, {
+                            destination: PLATFORM_TREASURY,
+                            amount:      lamports(mintInfo.commissionLamports),
+                        })
+                    );
+                }
+
+                await txBuilder
+                    .setBlockhash(latestBlockhash)
+                    .sendAndConfirm(umi, {
+                        confirm: { strategy: { type: 'blockhash', ...latestBlockhash } },
+                    });
 
                 const mintAddress = mint.publicKey; // PublicKey is a base-58 string in Umi v1
 
                 // Step 3 — Persist the on-chain mint address back to Firestore.
-                setUploadProgress('Step 3/3 — Recording on-chain identity…');
+                setUploadProgress('Step 3/4 — Recording on-chain identity…');
                 await apiUpdateNFT(nftId, { mintAddress });
+
+                // Step 4 — Create a feed post so the NFT appears on the home page.
+                setUploadProgress('Step 4/4 — Publishing to feed…');
+                await apiCreatePost({
+                    nftImage:    result.image,
+                    title:       title.trim(),
+                    description: description.trim(),
+                    tags,
+                    forSale,
+                    price:       forSale && price ? parseFloat(price) : null,
+                    currency,
+                    walletNftId: nftId,
+                });
             }
             setUploadProgress('');
             setSuccess(true);
