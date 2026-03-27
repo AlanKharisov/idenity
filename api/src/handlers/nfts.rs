@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     errors::{ApiResult, AppError},
     middleware::auth::AuthenticatedUser,
-    models::{BatchItemResult, BatchNftInput, BatchUploadResponse, CreateEditionResponse, CreateNftRequest, Nft, UpdateNftRequest},
+    models::{BatchItemResult, BatchNftInput, BatchUploadResponse, CreateEditionResponse, CreateNftRequest, Nft, TransferNftRequest, UpdateNftRequest},
     notification_helpers,
     services::StorageClient,
     AppState,
@@ -635,5 +635,76 @@ pub async fn create_edition_nfts(
         image_url,
         edition_ids,
         edition_count,
+    })))
+}
+
+/// `POST /api/nfts/:id/transfer`
+///
+/// Off-chain ownership sync called by the buyer immediately after an on-chain
+/// Solana transaction confirms. Does NOT touch balances — the SOL already moved
+/// on-chain. Steps:
+///   a) Remove the NFT from `marki_wallets/{seller_id}`.
+///   b) Stamp the record with the buyer's uid/name and `for_sale = false`.
+///   c) Append it to `marki_wallets/{buyer_uid}`.
+///   d) Set `forSale = false` on the corresponding `posts` document so the
+///      listing can no longer be purchased.
+pub async fn transfer_nft(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+    Path(nft_id): Path<String>,
+    Json(body): Json<TransferNftRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let buyer_uid = &auth.uid;
+
+    if buyer_uid == &body.seller_id {
+        return Err(AppError::BadRequest("Cannot transfer an NFT to yourself".to_owned()));
+    }
+
+    // ── a) Remove NFT from seller's wallet ────────────────────────────────────
+    let mut seller_nfts = load_nfts(&state, &body.seller_id).await?;
+    let pos = seller_nfts
+        .iter()
+        .position(|n| n.id == nft_id)
+        .ok_or_else(|| AppError::NotFound(format!("NFT {} not found in seller wallet", nft_id)))?;
+    let seller_nft = seller_nfts.remove(pos);
+    save_nfts(&state, &body.seller_id, &seller_nfts).await?;
+
+    // ── b) Fetch buyer's display name ─────────────────────────────────────────
+    let buyer_doc = state
+        .firestore
+        .get("users", buyer_uid)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+    let buyer_name = buyer_doc
+        .as_ref()
+        .and_then(|d| d.get("name").and_then(|v| v.as_str()))
+        .unwrap_or("Unknown")
+        .to_owned();
+
+    // Build the new record with updated ownership.
+    let new_id = Uuid::new_v4().to_string();
+    let transferred = Nft {
+        id:         new_id.clone(),
+        owner_id:   buyer_uid.clone(),
+        owner_name: buyer_name,
+        for_sale:   false,
+        price:      None,
+        ..seller_nft
+    };
+
+    // ── c) Append to buyer's wallet ───────────────────────────────────────────
+    let mut buyer_nfts = load_nfts(&state, buyer_uid).await?;
+    buyer_nfts.push(transferred);
+    save_nfts(&state, buyer_uid, &buyer_nfts).await?;
+
+    // ── d) Mark post as sold (non-fatal: listing may already be gone) ─────────
+    let _ = state
+        .firestore
+        .update("posts", &body.post_id, &json!({ "forSale": false }))
+        .await;
+
+    Ok(Json(json!({
+        "success":  true,
+        "newNftId": new_id,
     })))
 }

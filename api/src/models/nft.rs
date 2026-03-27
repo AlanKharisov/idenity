@@ -88,6 +88,17 @@ pub struct UpdateNftRequest {
     pub mint_address: Option<String>,
 }
 
+/// Body for `POST /api/nfts/:id/transfer`.
+/// Called by the buyer after an on-chain Solana transaction confirms.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TransferNftRequest {
+    /// Firebase UID of the current owner (seller).
+    pub seller_id: String,
+    /// Firestore document ID of the marketplace post to mark as sold.
+    pub post_id: String,
+}
+
 /// Response from `POST /api/nfts/editions`.
 /// The frontend uses this to drive the on-chain Master Edition + printV1 calls.
 #[derive(Debug, Serialize)]

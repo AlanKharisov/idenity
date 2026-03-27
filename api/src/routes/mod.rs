@@ -49,9 +49,10 @@ pub fn api_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
                 .layer(DefaultBodyLimit::max(100 * 1024 * 1024)))  // 100 MB for batch
             .route("/editions",  post(nfts::create_edition_nfts)   // static — must stay above /:id
                 .layer(DefaultBodyLimit::max(20 * 1024 * 1024)))   // 20 MB image
-            .route("/:id",       get(nfts::get_nft))
-            .route("/:id",       put(nfts::update_nft))
-            .route("/:id",       delete(nfts::delete_nft))
+            .route("/:id",          get(nfts::get_nft))
+            .route("/:id",          put(nfts::update_nft))
+            .route("/:id",          delete(nfts::delete_nft))
+            .route("/:id/transfer", post(nfts::transfer_nft))
         )
         // Posts / feed
         .route("/posts", get(posts::get_posts))

@@ -68,6 +68,31 @@ pub async fn create_post(
         .and_then(|v| v.as_str())
         .map(str::to_owned);
 
+    // Fetch the seller's primary connected Phantom wallet address so BuyModal
+    // can execute the on-chain SOL transfer without an extra API round-trip.
+    let seller_address: Option<String> = state
+        .firestore
+        .get("crypto_wallets", &auth.uid)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|doc| {
+            doc.get("wallets")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| {
+                    // Prefer the wallet explicitly marked as connected; fall
+                    // back to the first entry if none is flagged yet.
+                    arr.iter()
+                        .find(|w| {
+                            w.get("isConnected")
+                                .and_then(|c| c.as_bool())
+                                .unwrap_or(false)
+                        })
+                        .or_else(|| arr.first())
+                        .and_then(|w| w.get("address").and_then(|a| a.as_str()).map(str::to_owned))
+                })
+        });
+
     // For collection posts the caller may omit nft_image and rely on nft_images[0].
     let primary_image = body.nft_image
         .or_else(|| body.nft_images.first().cloned())
@@ -92,6 +117,7 @@ pub async fn create_post(
         wallet_nft_id: body.wallet_nft_id,
         nft_images: body.nft_images,
         wallet_nft_ids: body.wallet_nft_ids,
+        seller_address,
     };
 
     let mut value = serde_json::to_value(&post).map_err(|e| AppError::Internal(e.into()))?;

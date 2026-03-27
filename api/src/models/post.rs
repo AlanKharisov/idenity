@@ -41,6 +41,10 @@ pub struct Post {
     /// Collection posts: all wallet NFT IDs. Empty on single-NFT posts.
     #[serde(default)]
     pub wallet_nft_ids: Vec<String>,
+    /// Seller's primary Phantom wallet address — set at listing time so the
+    /// buyer's frontend knows where to send SOL without an extra round-trip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub seller_address: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

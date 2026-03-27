@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { apiGetCryptoWallets, apiBuyNFT, apiCashOnDelivery } from '../services/apiClient';
+import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { apiGetCryptoWallets, apiTransferNFT, apiCashOnDelivery } from '../services/apiClient';
 
 interface BuyModalProps {
     nft: any;
@@ -46,15 +47,51 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
     const hasFunds       = selectedWallet ? (selectedWallet.balance || 0) >= total : false;
 
     const handleBuyCrypto = async () => {
-        if (!currentUser || !selectedWalletId) return;
+        if (!currentUser || !selectedWalletId || !selectedWallet) return;
+
+        // The seller's Phantom address must be present on the post object.
+        // Ensure your backend populates `sellerAddress` when returning posts
+        // (add it to the Post model and set it from the seller's crypto wallet
+        // when a listing is created).
+        const sellerAddress: string | undefined = (nft as any).sellerAddress;
+        if (!sellerAddress) {
+            alert('❌ Seller wallet address is unavailable — cannot execute on-chain transfer.');
+            return;
+        }
+
         setBuying(true);
         try {
-            await apiBuyNFT({
-                postId:        nft.id,
-                buyerWalletId: selectedWalletId,
-                nftId:         nft.walletNftId || nft.id,
-            });
-            onSuccess?.(nft);
+            // ── Step 1: On-chain SOL transfer via Phantom ──────────────────────
+            const phantom = (window as any).phantom?.solana ?? (window as any).solana;
+            if (!phantom?.isPhantom) throw new Error('Phantom wallet not found. Please install the Phantom extension.');
+
+            const rpcUrl = (import.meta as any).env?.VITE_SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com';
+            const connection = new Connection(rpcUrl, 'confirmed');
+
+            const lamports = Math.round(total * LAMPORTS_PER_SOL);
+            const tx = new Transaction().add(
+                SystemProgram.transfer({
+                    fromPubkey: new PublicKey(selectedWallet.address),
+                    toPubkey:   new PublicKey(sellerAddress),
+                    lamports,
+                })
+            );
+            const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+            tx.recentBlockhash = blockhash;
+            tx.feePayer = new PublicKey(selectedWallet.address);
+
+            const { signature } = await phantom.signAndSendTransaction(tx);
+            await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+
+            // ── Step 2: Sync off-chain Firestore state ─────────────────────────
+            const walletNftId = nft.walletNftId || nft.id;
+            const sellerId    = nft.userId;   // seller's Firebase UID
+            const postId      = nft.id;       // marketplace post document ID
+
+            await apiTransferNFT(walletNftId, sellerId, postId);
+
+            // ── Step 3: Update local UI ────────────────────────────────────────
+            onSuccess?.({ ...nft, forSale: false, ownerId: currentUser.uid, ownerName: currentUser.email });
             onClose();
             alert(`✅ You bought "${nft.title}" for ${nftPrice} ${nftCurrency}!`);
         } catch (err: any) {

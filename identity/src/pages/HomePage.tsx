@@ -270,13 +270,12 @@ const HomePage: React.FC = () => {
 
                         <div className="nft-content">
                             {(post as any).nftImages?.length > 0 ? (
-                                /* ── Collection gallery (horizontal scroll) ── */
+                                /* ── Collection gallery (CSS Grid) ── */
                                 <div style={{ position: 'relative' }}>
-                                    <style>{`::-webkit-scrollbar{display:none}`}</style>
                                     <div style={{
-                                        display: 'flex', gap: '8px',
-                                        overflowX: 'auto', scrollbarWidth: 'none',
-                                        paddingBottom: '2px',
+                                        display: 'grid',
+                                        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                                        gap: '8px',
                                     }}>
                                         {(post as any).nftImages.map((src: string, idx: number) => (
                                             <img
@@ -285,8 +284,9 @@ const HomePage: React.FC = () => {
                                                 alt={`${post.title} #${idx + 1}`}
                                                 loading="lazy"
                                                 style={{
-                                                    width: '160px', height: '160px', flexShrink: 0,
+                                                    width: '100%', aspectRatio: '1 / 1',
                                                     borderRadius: '10px', objectFit: 'cover',
+                                                    display: 'block',
                                                 }}
                                                 onError={e => { e.currentTarget.src = '/img/default-nft.png'; }}
                                             />

@@ -114,6 +114,18 @@ export const apiBuyNFT = (d: {
     nftId: string;
 }) => post<any>('/api/marketplace/buy', d);
 
+/** Called immediately after an on-chain Solana transaction confirms.
+ *  Syncs Firestore: moves the NFT from the seller's wallet to the buyer's
+ *  wallet and marks the post as no longer for sale. */
+export const apiTransferNFT = (
+    nftId:    string,   // wallet NFT ID (nft.walletNftId || nft.id)
+    sellerId: string,   // seller's Firebase UID (nft.userId)
+    postId:   string,   // marketplace post ID
+) => post<{ success: boolean; newNftId: string }>(
+    `/api/nfts/${nftId}/transfer`,
+    { sellerId, postId },
+);
+
 export const apiCashOnDelivery = (d: {
     postId: string;
     nftId: string;
