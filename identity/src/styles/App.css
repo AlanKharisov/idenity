@@ -386,9 +386,12 @@ body {
 .home-page .search-bar {
     display: flex;
     align-items: center;
-    padding: 15px;
+    padding: 12px 15px;
     background-color: white;
-    border-bottom: 1px solid #e0e0e0;
+    border-bottom: 1px solid #eeeeee;
+    position: sticky;
+    top: 0;
+    z-index: 50;
 }
 
 .home-page .search-input {
@@ -422,10 +425,10 @@ body {
 
 .home-page .nft-post {
     background-color: white;
-    margin-bottom: 15px;
+    margin-bottom: 12px;
     padding: 15px;
-    border-radius: 10px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    border-radius: 14px;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.07);
 }
 
 .home-page .user-info {
@@ -487,22 +490,22 @@ body {
 }
 
 .home-page .nft-content {
-    display: flex;
+    display: block;
     margin-bottom: 15px;
 }
 
 .home-page .nft-image {
-    width: 120px;
-    height: 120px;
-    border-radius: 10px;
+    width: 100%;
+    border-radius: 12px;
     overflow: hidden;
-    margin-right: 15px;
 }
 
 .home-page .nft-image img {
     width: 100%;
-    height: 100%;
+    max-height: 300px;
+    display: block;
     object-fit: cover;
+    border-radius: 12px;
 }
 
 .home-page .sound-wave {
@@ -628,12 +631,13 @@ body {
 
 /* Wallet Page */
 .wallet-section {
-    padding: 0 20px;
+    padding: 0 15px;
 }
 
 .wallet-title {
     text-align: center;
-    font-size: 24px;
+    font-size: 22px;
+    font-weight: bold;
     margin-bottom: 20px;
     padding-top: 20px;
     color: #333;
@@ -642,8 +646,8 @@ body {
 .tokens-container {
     display: flex;
     overflow-x: auto;
-    gap: 15px;
-    padding: 10px 0;
+    gap: 12px;
+    padding: 10px 0 14px;
     scrollbar-width: none;
 }
 
@@ -653,21 +657,22 @@ body {
 
 .token-card {
     min-width: 120px;
-    border: 2px solid #4caf50;
-    border-radius: 10px;
-    padding: 15px;
-    transition: all 0.3s ease;
+    border: 1.5px solid #01ff77;
+    border-radius: 12px;
+    padding: 14px;
+    transition: all 0.25s ease;
     cursor: pointer;
     background-color: white;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
+    box-shadow: 0 2px 8px rgba(1, 255, 119, 0.08);
 }
 
 .token-card:hover {
-    border-color: #2e7d32;
-    transform: translateY(-5px);
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    border-color: #00cc5e;
+    transform: translateY(-4px);
+    box-shadow: 0 6px 18px rgba(1, 255, 119, 0.18);
 }
 
 .token-header {
@@ -714,22 +719,22 @@ body {
 }
 
 .token-card:hover .token-usd {
-    color: #4caf50;
+    color: #01ff77;
 }
 
 .nft-section {
-    padding: 20px;
+    padding: 15px;
 }
 
 .nft-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
 }
 
 .nft-title {
-    font-size: 20px;
+    font-size: 18px;
     font-weight: bold;
     color: #333;
 }
@@ -739,28 +744,33 @@ body {
     border: none;
     font-size: 20px;
     cursor: pointer;
-    color: #333;
+    color: #888;
+    transition: color 0.2s;
+}
+
+.config-button:hover {
+    color: #01ff77;
 }
 
 .nft-container {
     display: grid;
     grid-template-columns: repeat(2, 1fr);
-    gap: 15px;
+    gap: 12px;
 }
 
 .nft-item {
     border-radius: 12px;
     overflow: hidden;
     background-color: white;
-    aspect-ratio: 16/9;
+    aspect-ratio: 1 / 1;
     position: relative;
-    border: 1px solid #e0e0e0;
-    transition: all 0.3s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+    transition: all 0.25s ease;
 }
 
 .nft-item:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+    transform: translateY(-4px);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
 }
 
 .nft-item img {
@@ -815,43 +825,53 @@ body {
     font-size: 20px;
     text-align: center;
     margin-bottom: 20px;
+    color: #333;
 }
 
 .alert-page .notification {
-    background-color: #e0f7fa;
-    border-radius: 10px;
+    background-color: white;
+    border-radius: 12px;
     padding: 15px;
-    margin-bottom: 15px;
-    transition: all 0.3s ease;
+    margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
+    border-left: 3px solid #01ff77;
+    transition: all 0.2s ease;
 }
 
 .alert-page .notification:hover {
-    transform: translateY(-3px);
+    transform: translateY(-2px);
     box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
 }
 
 .alert-page .notification-title {
     font-weight: bold;
-    font-size: 16px;
+    font-size: 15px;
     margin-bottom: 5px;
     display: flex;
     justify-content: space-between;
+    color: #222;
 }
 
 .alert-page .notification-time {
-    color: #888;
-    font-size: 12px;
+    color: #aaa;
+    font-size: 11px;
+    font-weight: normal;
 }
 
 .alert-page .notification-text {
-    font-size: 14px;
-    color: #333;
+    font-size: 13px;
+    color: #555;
+    line-height: 1.4;
 }
 
 /* Profile Page */
+.profile-page {
+    padding-bottom: 80px;
+}
+
 .profile-page .profile-header {
-    background-color: white;
-    padding: 20px;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    padding: 30px 20px 24px;
     text-align: center;
     position: relative;
     margin-bottom: 15px;
@@ -861,29 +881,34 @@ body {
     position: absolute;
     left: 15px;
     top: 20px;
-    background-color: #01ff77;
+    background-color: rgba(255, 255, 255, 0.2);
     color: white;
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
     border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.3s ease;
+    border: none;
+    font-size: 16px;
+    transition: all 0.2s ease;
 }
 
 .profile-page .back-btn:hover {
-    transform: scale(1.1);
+    background-color: rgba(255, 255, 255, 0.35);
+    transform: scale(1.08);
 }
 
 .profile-page .profile-avatar {
-    width: 80px;
-    height: 80px;
+    width: 84px;
+    height: 84px;
     border-radius: 50%;
-    margin: 0 auto 10px;
+    margin: 0 auto 12px;
     overflow: hidden;
     background-color: #ddd;
+    border: 3px solid rgba(255, 255, 255, 0.6);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
 }
 
 .profile-page .profile-avatar img {
@@ -894,49 +919,52 @@ body {
 
 .profile-page .profile-name {
     font-weight: bold;
-    font-size: 18px;
-    margin-bottom: 5px;
+    font-size: 20px;
+    margin-bottom: 4px;
+    color: white;
 }
 
 .profile-page .profile-location {
-    color: #888;
-    font-size: 14px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 13px;
     margin-bottom: 10px;
 }
 
 .profile-page .profile-bio {
-    font-size: 14px;
-    color: #333;
-    margin-bottom: 20px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.85);
+    margin-bottom: 0;
     padding: 0 20px;
+    line-height: 1.5;
 }
 
 .profile-page .section-title {
     font-weight: bold;
-    font-size: 16px;
+    font-size: 15px;
     margin: 15px;
+    color: #444;
 }
 
 .profile-page .account-card {
     background-color: white;
-    border-radius: 10px;
-    padding: 15px;
+    border-radius: 12px;
+    padding: 5px 15px;
     margin: 0 15px 15px;
-    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
 }
 
 .profile-page .account-item {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 10px 0;
-    border-bottom: 1px solid #f0f0f0;
+    padding: 13px 0;
+    border-bottom: 1px solid #f5f5f5;
     cursor: pointer;
-    transition: all 0.3s ease;
+    transition: all 0.2s ease;
 }
 
 .profile-page .account-item:hover {
-    background-color: #f5f5f5;
+    padding-left: 4px;
 }
 
 .profile-page .account-item:last-child {
@@ -945,20 +973,25 @@ body {
 
 .profile-page .account-item i {
     color: #01ff77;
-    margin-right: 10px;
+    margin-right: 12px;
+    font-size: 16px;
+    width: 18px;
+    text-align: center;
 }
 
 .add-nft-title {
     font-weight: bold;
     font-size: 20px;
     text-align: center;
-    margin-bottom: 10px;
+    margin-bottom: 8px;
+    color: #333;
 }
 
 .add-nft-subtitle {
     text-align: center;
     margin-bottom: 20px;
-    color: #666;
+    color: #888;
+    font-size: 13px;
 }
 
 .form-section {
@@ -1312,24 +1345,26 @@ body {
     justify-content: space-around;
     padding: 10px 0;
     background-color: white;
-    border-top: 1px solid #ddd;
+    border-top: 1px solid #e8e8e8;
     position: fixed;
     bottom: 0;
     width: 100%;
     max-width: 500px;
     z-index: 100;
+    box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.06);
 }
 
 .nav-item {
     text-align: center;
-    padding: 5px;
+    padding: 5px 10px;
     cursor: pointer;
-    color: #888;
-    font-size: 12px;
+    color: #bbb;
+    font-size: 11px;
+    font-weight: 500;
     display: flex;
     flex-direction: column;
     align-items: center;
-    transition: all 0.3s ease;
+    transition: all 0.2s ease;
 }
 
 .nav-item:hover {
@@ -1337,12 +1372,12 @@ body {
 }
 
 .nav-item i {
-    font-size: 20px;
-    margin-bottom: 5px;
+    font-size: 22px;
+    margin-bottom: 4px;
 }
 
 .nav-item.active {
-    color: black;
+    color: #01ff77;
 }
 
 /* Security Page Styles */
@@ -1353,16 +1388,18 @@ body {
 
 .security-title {
     font-weight: bold;
-    font-size: 24px;
+    font-size: 20px;
     text-align: center;
     margin: 20px 0;
+    color: #333;
 }
 
 .security-container {
     background-color: white;
-    border-radius: 15px;
+    border-radius: 14px;
     padding: 20px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.07);
+    margin-bottom: 15px;
 }
 
 .toggle-2fa {
@@ -1386,16 +1423,18 @@ body {
 
 .wallet-settings-title {
     font-weight: bold;
-    font-size: 24px;
+    font-size: 20px;
     text-align: center;
     margin: 20px 0;
+    color: #333;
 }
 
 .wallet-settings-container {
     background-color: white;
-    border-radius: 15px;
+    border-radius: 14px;
     padding: 20px;
-    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.07);
+    margin-bottom: 15px;
 }
 
 .setup-wallet h3 {
@@ -1534,19 +1573,13 @@ input:checked + .slider:before {
     border-radius: 50%;
 }
 
+/* Collection gallery — hide scrollbar in WebKit */
+.nft-collection-scroll::-webkit-scrollbar {
+    display: none;
+}
+
 /* Адаптивные стили */
 @media (max-width: 480px) {
-    .home-page .nft-content {
-        flex-direction: column;
-    }
-
-    .home-page .nft-image {
-        width: 100%;
-        height: 200px;
-        margin-right: 0;
-        margin-bottom: 10px;
-    }
-
     .home-page .sound-wave {
         height: 60px;
     }

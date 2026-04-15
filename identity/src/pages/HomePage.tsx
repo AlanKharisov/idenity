@@ -10,6 +10,65 @@ const DEFAULT_AVATAR = '/img/default-avatar.png';
 
 const FILTER_OPTIONS = ['All', 'For Sale', 'Art', 'Music', 'Photography', 'Gaming', '3D', 'Collectible'];
 
+// ── Collection gallery helper ─────────────────────────────────────────────────
+// Horizontal scroll carousel — swipe left/right to browse all images.
+function CollectionGallery({ images, title }: { images: string[]; title: string }) {
+    return (
+        <div style={{ position: 'relative', width: '100%' }}>
+            {/* Badge */}
+            <div style={{
+                position: 'absolute', top: '8px', left: '8px', zIndex: 2,
+                background: 'rgba(0,0,0,0.62)', color: 'white',
+                borderRadius: '12px', padding: '2px 10px',
+                fontSize: '11px', fontWeight: 'bold', pointerEvents: 'none',
+            }}>
+                {images.length} NFTs
+            </div>
+
+            {/* Scroll track */}
+            <div className="nft-collection-scroll" style={{
+                display: 'flex',
+                gap: '8px',
+                overflowX: 'auto',
+                scrollSnapType: 'x mandatory',
+                WebkitOverflowScrolling: 'touch',
+                scrollbarWidth: 'none',
+                borderRadius: '12px',
+            }}>
+                {images.map((src, idx) => (
+                    <img
+                        key={idx}
+                        src={src || '/img/default-nft.png'}
+                        alt={`${title} #${idx + 1}`}
+                        loading="lazy"
+                        style={{
+                            width: '72%',
+                            flexShrink: 0,
+                            aspectRatio: '1 / 1',
+                            objectFit: 'cover',
+                            borderRadius: '10px',
+                            display: 'block',
+                            scrollSnapAlign: 'start',
+                        }}
+                        onError={e => { e.currentTarget.src = '/img/default-nft.png'; }}
+                    />
+                ))}
+                {/* Right-side breathing room so last image scrolls fully into view */}
+                <div style={{ flexShrink: 0, width: '4px' }} />
+            </div>
+
+            {/* Dot indicators */}
+            {images.length > 1 && (
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '5px', marginTop: '8px' }}>
+                    {images.map((_, i) => (
+                        <div key={i} style={{ width: '6px', height: '6px', borderRadius: '50%', background: i === 0 ? '#01ff77' : '#ddd' }} />
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 const HomePage: React.FC = () => {
     const { posts, loading, likePost, addComment, refreshPosts } = usePosts();
     const { currentUser } = useAuth();
@@ -270,37 +329,11 @@ const HomePage: React.FC = () => {
 
                         <div className="nft-content">
                             {(post as any).nftImages?.length > 0 ? (
-                                /* ── Collection gallery (CSS Grid) ── */
-                                <div style={{ position: 'relative' }}>
-                                    <div style={{
-                                        display: 'grid',
-                                        gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-                                        gap: '8px',
-                                    }}>
-                                        {(post as any).nftImages.map((src: string, idx: number) => (
-                                            <img
-                                                key={idx}
-                                                src={src || '/img/default-nft.png'}
-                                                alt={`${post.title} #${idx + 1}`}
-                                                loading="lazy"
-                                                style={{
-                                                    width: '100%', aspectRatio: '1 / 1',
-                                                    borderRadius: '10px', objectFit: 'cover',
-                                                    display: 'block',
-                                                }}
-                                                onError={e => { e.currentTarget.src = '/img/default-nft.png'; }}
-                                            />
-                                        ))}
-                                    </div>
-                                    <div style={{
-                                        position: 'absolute', top: '8px', right: '8px',
-                                        background: 'rgba(0,0,0,0.6)', color: 'white',
-                                        borderRadius: '12px', padding: '2px 8px',
-                                        fontSize: '11px', fontWeight: 'bold', pointerEvents: 'none',
-                                    }}>
-                                        {(post as any).nftImages.length} NFTs
-                                    </div>
-                                </div>
+                                /* ── Collection gallery ── */
+                                <CollectionGallery
+                                    images={(post as any).nftImages}
+                                    title={post.title}
+                                />
                             ) : (
                                 /* ── Single NFT image ── */
                                 <div className="nft-image">
