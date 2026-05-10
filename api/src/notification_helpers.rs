@@ -207,10 +207,13 @@ pub async fn notify_cod_buyer(
 pub async fn notify_cod_seller(
     db: &FirestoreClient,
     seller_id: &str,
+    order_id: &str,
     nft_title: &str,
     price: f64,
     currency: &str,
     buyer_name: &str,
+    full_name: &str,
+    phone: &str,
     delivery_address: &str,
 ) {
     let res = create(
@@ -219,14 +222,19 @@ pub async fn notify_cod_seller(
         NotificationType::Sale,
         "New COD order 🚚".to_owned(),
         format!(
-            "{} ordered \"{}\" for {} {}. Ship to Nova Poshta: {}",
-            buyer_name, nft_title, price, currency, delivery_address
+            "{} ordered \"{}\" for {} {}.\nShip to: {} ({}), {}",
+            buyer_name, nft_title, price, currency,
+            full_name, phone, delivery_address
         ),
         Some(NotificationMeta {
             nft_title: Some(nft_title.to_owned()),
             price: Some(price),
             currency: Some(currency.to_owned()),
             from_user: Some(buyer_name.to_owned()),
+            order_id: Some(order_id.to_owned()),
+            delivery_address: Some(delivery_address.to_owned()),
+            buyer_full_name: Some(full_name.to_owned()),
+            buyer_phone: Some(phone.to_owned()),
             ..Default::default()
         }),
     )

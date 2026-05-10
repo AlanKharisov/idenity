@@ -17,6 +17,13 @@ pub struct UserData {
     pub delivery_address: Option<String>,
     #[serde(default)]
     pub pending_approval: bool,
+    /// Any combination of: `owner`, `manager`, `controller`, `courier`, `customer`.
+    /// Empty array == plain customer (legacy users default to this).
+    #[serde(default)]
+    pub roles: Vec<String>,
+    /// uid of the company-owner this user reports to (when role is courier/manager/controller).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub company_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -49,4 +56,11 @@ pub struct ChangePasswordRequest {
 #[serde(rename_all = "camelCase")]
 pub struct SetApprovalRequest {
     pub approved: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateRolesRequest {
+    pub roles: Vec<String>,
+    pub company_id: Option<String>,
 }

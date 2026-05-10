@@ -104,6 +104,8 @@ pub async fn register(
         company_approved: false,
         delivery_address: None,
         pending_approval: false,
+        roles: Vec::new(),
+        company_id: None,
     };
 
     let user_value = serde_json::to_value(&user).map_err(|e| AppError::Internal(e.into()))?;

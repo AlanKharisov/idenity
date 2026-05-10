@@ -1,6 +1,8 @@
 import { auth } from '../firebase/config';
 
-const BASE_URL = 'https://idenity-backend.duckdns.org'; // Ваш публічний IP сервера AWS
+// Use REACT_APP_API_URL env var for local dev, fall back to production.
+// To run locally: create identity/.env.local with REACT_APP_API_URL=http://localhost:8090
+const BASE_URL = process.env.REACT_APP_API_URL || 'https://idenity-backend.duckdns.org';
 
 async function getToken(): Promise<string | null> {
     try {
@@ -131,10 +133,142 @@ export const apiCashOnDelivery = (d: {
     nftId: string;
     deliveryAddress: string;
     currency: string;
+    fullName: string;
+    phone: string;
 }) => post<any>('/api/marketplace/cod', d);
+
+// ── COD orders (CRM inbox) ────────────────────────────────────────────────────
+export type CodOrder = {
+    id: string;
+    postId: string;
+    nftId: string;
+    nftTitle: string;
+    buyerId: string;
+    buyerName: string;
+    sellerId: string;
+    price: number;
+    nftCurrency: string;
+    paymentCurrency: string;
+    deliveryAddress: string;
+    fullName: string;
+    phone: string;
+    status: 'pending' | 'in_delivery' | 'completed' | 'cancelled';
+    createdAt: string;
+    deliveryId?: string;
+};
+
+export const apiListCodOrders = () => get<CodOrder[]>('/api/cod-orders');
+export const apiAcceptCodOrder = (id: string, d: {
+    carrierType: 'self' | 'nova_poshta';
+    npTrackingNumber?: string;
+    courierId?: string;
+    controllerId?: string;
+    nfcUid?: string;
+}) => post<Delivery>(`/api/cod-orders/${id}/accept`, d);
+
+// ── AI image generation ───────────────────────────────────────────────────────
+export const apiAiGenerateImage = (prompt: string): Promise<Blob> =>
+    fetch(`${BASE_URL}/api/ai/generate`, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ prompt }),
+    }).then(res => {
+        if (!res.ok) return res.text().then(t => Promise.reject(new Error(t || `HTTP ${res.status}`)));
+        return res.blob();
+    });
 
 // ── Notifications ─────────────────────────────────────────────────────────────
 export const apiGetNotifications   = ()                   => get<any[]>('/api/notifications');
 export const apiMarkRead           = (id: string)         => put<any>(`/api/notifications/${id}/read`);
 export const apiMarkAllRead        = ()                   => put<any>('/api/notifications/read-all');
 export const apiDeleteNotification = (id: string)         => del<any>(`/api/notifications/${id}`);
+
+// ── Deliveries (CRM) ──────────────────────────────────────────────────────────
+export type DeliveryCheckpoint = {
+    id: string;
+    status: string;
+    location: string;
+    timestamp: string;
+    recordedBy: string;
+    recordedByName?: string;
+    note?: string;
+};
+
+export type Delivery = {
+    id: string;
+    orderId?: string;
+    nftId: string;
+    nftTitle: string;
+    sellerId: string;
+    buyerId: string;
+    buyerName: string;
+    deliveryAddress: string;
+    carrierType: 'self' | 'nova_poshta';
+    courierId?: string;
+    courierName?: string;
+    controllerId?: string;
+    controllerName?: string;
+    npTrackingNumber?: string;
+    npLastSyncedAt?: string;
+    status: string;
+    checkpoints: DeliveryCheckpoint[];
+    customerReceived: boolean;
+    receivedAt?: string;
+    nfcUid?: string;
+    nfcVerified: boolean;
+    nfcVerifiedAt?: string;
+    createdAt: string;
+    updatedAt: string;
+};
+
+export const apiListDeliveries = () => get<Delivery[]>('/api/deliveries');
+export const apiGetDelivery    = (id: string) => get<Delivery>(`/api/deliveries/${id}`);
+
+export const apiCreateDelivery = (d: {
+    orderId?: string;
+    nftId: string;
+    buyerId: string;
+    deliveryAddress: string;
+    carrierType: 'self' | 'nova_poshta';
+    npTrackingNumber?: string;
+    courierId?: string;
+    controllerId?: string;
+    nfcUid?: string;
+}) => post<Delivery>('/api/deliveries', d);
+
+export const apiUpdateCarrier = (id: string, d: {
+    carrierType: 'self' | 'nova_poshta';
+    npTrackingNumber?: string;
+    courierId?: string;
+    controllerId?: string;
+}) => put<Delivery>(`/api/deliveries/${id}/carrier`, d);
+
+export const apiUpdateDeliveryStatus = (id: string, status: string) =>
+    put<Delivery>(`/api/deliveries/${id}/status`, { status });
+
+export const apiAddCheckpoint = (id: string, d: {
+    status: string;
+    location: string;
+    note?: string;
+}) => post<Delivery>(`/api/deliveries/${id}/checkpoints`, d);
+
+export const apiSyncNovaPoshta = (id: string) =>
+    post<Delivery>(`/api/deliveries/${id}/sync-novaposhta`);
+
+export const apiConfirmReceipt = (id: string) =>
+    post<Delivery>(`/api/deliveries/${id}/confirm-receipt`);
+
+// ── NFC ───────────────────────────────────────────────────────────────────────
+export const apiBindNfc = (d: { nftId: string; nfcUid: string }) =>
+    post<{ success: boolean; nfcUid: string; nftId: string }>('/api/nfc/bind', d);
+
+export const apiVerifyNfc = (nfcUid: string) =>
+    post<{
+        nftId: string;
+        nftTitle: string;
+        ownerId: string;
+        ownerName: string;
+        mintAddress?: string;
+        deliveryId?: string;
+        autoConfirmedReceipt: boolean;
+    }>('/api/nfc/verify', { nfcUid });

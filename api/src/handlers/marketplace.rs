@@ -250,6 +250,13 @@ pub async fn buy_nft_cod(
         .unwrap_or("Unknown")
         .to_owned();
 
+    if body.full_name.trim().is_empty() {
+        return Err(AppError::BadRequest("Full name is required".to_owned()));
+    }
+    if body.phone.trim().is_empty() {
+        return Err(AppError::BadRequest("Phone number is required".to_owned()));
+    }
+
     // ── 3. Record COD order ───────────────────────────────────────────────────
     let order_id = uuid::Uuid::new_v4().to_string();
     let order = CodOrder {
@@ -264,8 +271,11 @@ pub async fn buy_nft_cod(
         nft_currency:     nft_currency.clone(),
         payment_currency: body.currency.clone(),
         delivery_address: body.delivery_address.clone(),
+        full_name:        body.full_name.clone(),
+        phone:            body.phone.clone(),
         status:           "pending".to_owned(),
         created_at:       Utc::now().to_rfc3339(),
+        delivery_id:      None,
     };
     let order_value = serde_json::to_value(&order)
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
@@ -288,10 +298,13 @@ pub async fn buy_nft_cod(
     notification_helpers::notify_cod_seller(
         &state.firestore,
         &seller_id,
+        &order_id,
         &nft_title,
         price,
         &nft_currency,
         &buyer_name,
+        &body.full_name,
+        &body.phone,
         &body.delivery_address,
     )
     .await;

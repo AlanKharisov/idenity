@@ -697,11 +697,39 @@ pub async fn transfer_nft(
     buyer_nfts.push(transferred);
     save_nfts(&state, buyer_uid, &buyer_nfts).await?;
 
-    // ── d) Mark post as sold (non-fatal: listing may already be gone) ─────────
-    let _ = state
-        .firestore
-        .update("posts", &body.post_id, &json!({ "forSale": false }))
-        .await;
+    // ── d) Pull post details for notification, then delete it ─────────────────
+    // We keep the same delete-the-post semantics as marketplace::buy_nft so
+    // the listing actually disappears from the feed; previously this only
+    // flipped `forSale: false`, leaving the card visible if the feed didn't
+    // filter on that flag.
+    let post_doc = state.firestore.get("posts", &body.post_id).await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+    let nft_title = post_doc.as_ref()
+        .and_then(|d| d.get("title").and_then(|v| v.as_str()))
+        .unwrap_or("NFT")
+        .to_owned();
+    let price = post_doc.as_ref()
+        .and_then(|d| d.get("price").and_then(|v| v.as_f64()))
+        .unwrap_or(0.0);
+    let currency = post_doc.as_ref()
+        .and_then(|d| d.get("currency").and_then(|v| v.as_str()))
+        .unwrap_or("SOL")
+        .to_owned();
+
+    let _ = state.firestore.delete("posts", &body.post_id).await;
+
+    // ── e) Notifications: buyer "you bought it", seller "you sold it" ─────────
+    let buyer_display = state.firestore.get("users", buyer_uid).await.ok().flatten()
+        .as_ref()
+        .and_then(|d| d.get("name").and_then(|v| v.as_str()).map(str::to_owned))
+        .unwrap_or_else(|| "Buyer".to_owned());
+
+    crate::notification_helpers::notify_purchase(
+        &state.firestore, buyer_uid, &nft_title, price, &currency,
+    ).await;
+    crate::notification_helpers::notify_sale(
+        &state.firestore, &body.seller_id, &nft_title, price, &currency, &buyer_display,
+    ).await;
 
     Ok(Json(json!({
         "success":  true,

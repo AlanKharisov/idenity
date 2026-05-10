@@ -1,246 +1,305 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { signInWithGoogle, signInWithFacebook, signInWithApple } from '../firebase/socialAuth';
+import { Icon } from '../components/brand';
 
 interface AuthScreenProps {
-    onAuthSuccess: () => void;
+  onAuthSuccess: () => void;
 }
 
 const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
-    const [currentForm, setCurrentForm] = useState<'login' | 'signup'>('login');
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
+  const [currentForm, setCurrentForm] = useState<'login' | 'signup'>('login');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
 
-    const [email, setEmail] = useState('');
-    const [name, setName] = useState('');
-    const [username, setUsername] = useState('');
-    const [phone, setPhone] = useState('');
-    const [password, setPassword] = useState('');
-    const [confirmPassword, setConfirmPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [name, setName] = useState('');
+  const [username, setUsername] = useState('');
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
-    const { login, register } = useAuth();
+  const { login, register } = useAuth();
 
-    const handleSignup = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError('');
+  const handleSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (password !== confirmPassword) { setError('Passwords do not match'); return; }
+    if (!username) { setError('Username is required'); return; }
+    setLoading(true);
+    const result = await register(email, password, name, username, phone);
+    setLoading(false);
+    if (result.success) onAuthSuccess();
+    else setError(result.error || 'Registration failed');
+  };
 
-        if (password !== confirmPassword) {
-            setError('Passwords do not match');
-            return;
-        }
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    const result = await login(email, password);
+    setLoading(false);
+    if (result.success) onAuthSuccess();
+    else setError(result.error || 'Login failed');
+  };
 
-        if (!username) {
-            setError('Username is required');
-            return;
-        }
+  const isSignup = currentForm === 'signup';
 
-        setLoading(true);
-        const result = await register(email, password, name, username, phone);
-        setLoading(false);
+  return (
+    <div
+      className="screen auth-screen active"
+      style={{
+        background: 'var(--bg-page)',
+        padding: '60px 28px 32px',
+        flexDirection: 'column',
+      }}
+    >
+      <button
+        onClick={() => (isSignup ? setCurrentForm('login') : window.history.back())}
+        style={{
+          width: 40,
+          height: 40,
+          borderRadius: 12,
+          background: 'var(--bg-soft)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--text)',
+        }}
+        aria-label="Back"
+      >
+        <Icon.ArrowLeft />
+      </button>
 
-        if (result.success) {
-            onAuthSuccess();
-        } else {
-            setError(result.error || 'Registration failed');
-        }
-    };
+      <div style={{ marginTop: 32 }}>
+        <h1 className="h1" style={{ fontSize: 32 }}>
+          {isSignup ? 'Create account' : 'Welcome back'}
+        </h1>
+        <p style={{ fontSize: 15, color: 'var(--text-muted)', margin: '8px 0 0' }}>
+          {isSignup ? 'Sign up for your Mark Identity account' : 'Sign in to your Mark Identity account'}
+        </p>
+      </div>
 
-    const handleLogin = async (e: React.FormEvent) => {
-        e.preventDefault();
-        setError('');
-        setLoading(true);
-
-        const result = await login(email, password);
-        setLoading(false);
-
-        if (result.success) {
-            onAuthSuccess();
-        } else {
-            setError(result.error || 'Login failed');
-        }
-    };
-
-    return (
-        <div className="screen auth-screen active">
-            {/* Форма реєстрації */}
-            <div className={`auth-form signup-form ${currentForm === 'signup' ? 'active' : ''}`}>
-                <div className="auth-header">
-                    <h2 className="auth-title">Sign Up</h2>
-                </div>
-                <div className="auth-container">
-                    {error && <div style={{ color: 'red', marginBottom: '10px', textAlign: 'center' }}>{error}</div>}
-
-                    <form onSubmit={handleSignup}>
-                        <div className="form-group">
-                            <label>Email</label>
-                            <input
-                                type="email"
-                                placeholder="your@email.com"
-                                required
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>Full Name</label>
-                            <input
-                                type="text"
-                                placeholder="John Doe"
-                                required
-                                value={name}
-                                onChange={(e) => setName(e.target.value)}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>Username</label>
-                            <input
-                                type="text"
-                                placeholder="@username"
-                                required
-                                value={username}
-                                onChange={(e) => setUsername(e.target.value)}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>Phone Number (optional)</label>
-                            <input
-                                type="tel"
-                                placeholder="+380995683023"
-                                value={phone}
-                                onChange={(e) => setPhone(e.target.value)}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>Password</label>
-                            <input
-                                type="password"
-                                placeholder="Enter password"
-                                required
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>Confirm Password</label>
-                            <input
-                                type="password"
-                                placeholder="Confirm password"
-                                required
-                                value={confirmPassword}
-                                onChange={(e) => setConfirmPassword(e.target.value)}
-                            />
-                        </div>
-                        <button type="submit" className="submit-btn" disabled={loading}>
-                            {loading ? 'Loading...' : 'Sign Up'}
-                        </button>
-                    </form>
-
-                    <p className="divider">or</p>
-
-                    <div className="social-buttons">
-                        <button
-                            className="social-btn google"
-                            onClick={() => signInWithGoogle()}
-                            disabled={loading}
-                        >
-                            <i className="fab fa-google"></i>
-                        </button>
-                        <button
-                            className="social-btn facebook"
-                            onClick={() => signInWithFacebook()}
-                            disabled={loading}
-                        >
-                            <i className="fab fa-facebook-f"></i>
-                        </button>
-                        <button
-                            className="social-btn apple"
-                            onClick={() => signInWithApple()}
-                            disabled={loading}
-                        >
-                            <i className="fab fa-apple"></i>
-                        </button>
-                    </div>
-
-                    <p className="switch-auth">
-                        Already have an account?
-                        <a href="#" onClick={(e) => { e.preventDefault(); setCurrentForm('login'); setError(''); }}>
-                            Sign In
-                        </a>
-                    </p>
-                </div>
-            </div>
-
-            {/* Форма входу */}
-            <div className={`auth-form login-form ${currentForm === 'login' ? 'active' : ''}`}>
-                <div className="auth-header">
-                    <h2 className="auth-title">Sign In</h2>
-                </div>
-                <div className="auth-container">
-                    {error && <div style={{ color: 'red', marginBottom: '10px', textAlign: 'center' }}>{error}</div>}
-
-                    <form onSubmit={handleLogin}>
-                        <div className="form-group">
-                            <label>Email</label>
-                            <input
-                                type="email"
-                                placeholder="your@email.com"
-                                required
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>Password</label>
-                            <input
-                                type="password"
-                                placeholder="Enter password"
-                                required
-                                value={password}
-                                onChange={(e) => setPassword(e.target.value)}
-                            />
-                        </div>
-                        <button type="submit" className="submit-btn" disabled={loading}>
-                            {loading ? 'Loading...' : 'Sign In'}
-                        </button>
-                        <button className="forgot-password" type="button">Forgot password?</button>
-                    </form>
-
-                    <p className="divider">or</p>
-
-                    <div className="social-buttons">
-                        <button
-                            className="social-btn google"
-                            onClick={() => signInWithGoogle()}
-                            disabled={loading}
-                        >
-                            <i className="fab fa-google"></i>
-                        </button>
-                        <button
-                            className="social-btn facebook"
-                            onClick={() => signInWithFacebook()}
-                            disabled={loading}
-                        >
-                            <i className="fab fa-facebook-f"></i>
-                        </button>
-                        <button
-                            className="social-btn apple"
-                            onClick={() => signInWithApple()}
-                            disabled={loading}
-                        >
-                            <i className="fab fa-apple"></i>
-                        </button>
-                    </div>
-
-                    <p className="switch-auth">
-                        Don't have an account?
-                        <a href="#" onClick={(e) => { e.preventDefault(); setCurrentForm('signup'); setError(''); }}>
-                            Sign Up
-                        </a>
-                    </p>
-                </div>
-            </div>
+      {error && (
+        <div
+          style={{
+            marginTop: 16,
+            padding: '10px 14px',
+            background: 'rgba(229,72,72,0.08)',
+            color: 'var(--danger)',
+            borderRadius: 12,
+            fontSize: 13,
+            border: '1px solid rgba(229,72,72,0.2)',
+          }}
+        >
+          {error}
         </div>
-    );
+      )}
+
+      <form
+        onSubmit={isSignup ? handleSignup : handleLogin}
+        style={{ marginTop: 28, display: 'flex', flexDirection: 'column', gap: 16, flex: '0 0 auto' }}
+      >
+        <div className="field">
+          <label>Email</label>
+          <input
+            type="email"
+            placeholder="alex@email.com"
+            required
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+          />
+        </div>
+
+        {isSignup && (
+          <>
+            <div className="field">
+              <label>Full Name</label>
+              <input
+                type="text"
+                placeholder="John Doe"
+                required
+                value={name}
+                onChange={e => setName(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Username</label>
+              <input
+                type="text"
+                placeholder="@username"
+                required
+                value={username}
+                onChange={e => setUsername(e.target.value)}
+              />
+            </div>
+            <div className="field">
+              <label>Phone (optional)</label>
+              <input
+                type="tel"
+                placeholder="+380995683023"
+                value={phone}
+                onChange={e => setPhone(e.target.value)}
+              />
+            </div>
+          </>
+        )}
+
+        <div className="field">
+          <label>Password</label>
+          <input
+            type="password"
+            placeholder="••••••••••"
+            required
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+          />
+        </div>
+
+        {isSignup && (
+          <div className="field">
+            <label>Confirm Password</label>
+            <input
+              type="password"
+              placeholder="••••••••••"
+              required
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+            />
+          </div>
+        )}
+
+        {!isSignup && (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              fontSize: 13,
+            }}
+          >
+            <span style={{ color: 'var(--text-muted)' }}>&nbsp;</span>
+            <button
+              type="button"
+              onClick={() => { /* TODO: forgot password flow */ }}
+              style={{ color: 'var(--primary)', fontWeight: 600, padding: 0 }}
+            >
+              Forgot?
+            </button>
+          </div>
+        )}
+
+        <button
+          type="submit"
+          disabled={loading}
+          className="btn btn-primary btn-block"
+          style={{ marginTop: 4, padding: '16px', fontSize: 16 }}
+        >
+          {loading ? 'Loading…' : isSignup ? 'Sign up' : 'Sign in'}
+        </button>
+      </form>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          margin: '24px 0',
+          color: 'var(--text-faint)',
+          fontSize: 12,
+        }}
+      >
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+        <span>OR CONTINUE WITH</span>
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button
+          onClick={() => signInWithGoogle()}
+          disabled={loading}
+          style={{
+            flex: 1,
+            padding: 14,
+            borderRadius: 14,
+            background: 'var(--bg-soft)',
+            fontWeight: 700,
+            fontSize: 18,
+            color: 'var(--text)',
+          }}
+          aria-label="Continue with Google"
+        >
+          G
+        </button>
+        <button
+          onClick={() => signInWithFacebook()}
+          disabled={loading}
+          style={{
+            flex: 1,
+            padding: 14,
+            borderRadius: 14,
+            background: 'var(--bg-soft)',
+            fontWeight: 700,
+            fontSize: 18,
+            color: 'var(--text)',
+          }}
+          aria-label="Continue with Facebook"
+        >
+          f
+        </button>
+        <button
+          onClick={() => signInWithApple()}
+          disabled={loading}
+          style={{
+            flex: 1,
+            padding: 14,
+            borderRadius: 14,
+            background: 'var(--bg-soft)',
+            fontWeight: 700,
+            fontSize: 18,
+            color: 'var(--text)',
+          }}
+          aria-label="Continue with Apple"
+        >
+
+        </button>
+      </div>
+
+      <div
+        style={{
+          marginTop: 'auto',
+          textAlign: 'center',
+          fontSize: 14,
+          color: 'var(--text-muted)',
+          paddingTop: 28,
+        }}
+      >
+        {isSignup ? (
+          <>
+            Already have an account?{' '}
+            <button
+              type="button"
+              onClick={() => { setCurrentForm('login'); setError(''); }}
+              style={{ color: 'var(--primary)', fontWeight: 600, padding: 0 }}
+            >
+              Sign in
+            </button>
+          </>
+        ) : (
+          <>
+            Don't have an account?{' '}
+            <button
+              type="button"
+              onClick={() => { setCurrentForm('signup'); setError(''); }}
+              style={{ color: 'var(--primary)', fontWeight: 600, padding: 0 }}
+            >
+              Sign up
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
 };
 
 export default AuthScreen;

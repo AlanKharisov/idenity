@@ -7,7 +7,7 @@ use axum::{
 use std::sync::Arc;
 
 use crate::{
-    handlers::{auth, marketplace, notifications, nfts, posts, profile, wallets},
+    handlers::{ai, auth, cod_orders, deliveries, marketplace, nfc, notifications, nfts, posts, profile, wallets},
     middleware::auth::auth_middleware,
     AppState,
 };
@@ -63,6 +63,21 @@ pub fn api_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         // Marketplace
         .route("/marketplace/buy", post(marketplace::buy_nft))
         .route("/marketplace/cod", post(marketplace::buy_nft_cod))
+        // COD orders — CRM inbox
+        .route("/cod-orders",            get(cod_orders::list_orders))
+        .route("/cod-orders/:id/accept", post(cod_orders::accept_order))
+        // Deliveries — CRM
+        .route("/deliveries", get(deliveries::list_deliveries))
+        .route("/deliveries", post(deliveries::create_delivery))
+        .route("/deliveries/:id", get(deliveries::get_delivery))
+        .route("/deliveries/:id/carrier",         put(deliveries::update_carrier))
+        .route("/deliveries/:id/status",          put(deliveries::update_status))
+        .route("/deliveries/:id/checkpoints",     post(deliveries::add_checkpoint))
+        .route("/deliveries/:id/sync-novaposhta", post(deliveries::sync_novaposhta))
+        .route("/deliveries/:id/confirm-receipt", post(deliveries::confirm_receipt))
+        // NFC binding & verification
+        .route("/nfc/bind",   post(nfc::bind_nfc))
+        .route("/nfc/verify", post(nfc::verify_nfc))
         // Notifications
         .route("/notifications", get(notifications::get_notifications))
         .route("/notifications/read-all", put(notifications::mark_all_read))
@@ -74,8 +89,10 @@ pub fn api_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             auth_middleware,
         ));
 
-    // ── Public routes ─────────────────────────────────────────────────────────
-    let public = Router::new().route("/auth/register", post(auth::register));
+    // ── Public routes (no auth required) ─────────────────────────────────────
+    let public = Router::new()
+        .route("/auth/register", post(auth::register))
+        .route("/ai/generate",   post(ai::generate_image));
 
     Router::new().merge(protected).merge(public)
 }

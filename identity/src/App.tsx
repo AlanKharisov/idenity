@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import './styles/App.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { apiGetMarkiWallet } from './services/apiClient';
+import { Icon } from './components/brand';
 import SplashScreen        from './pages/SplashScreen';
 import WelcomeScreen       from './pages/WelcomeScreen';
 import AuthScreen          from './pages/AuthScreen';
@@ -14,12 +15,13 @@ import NFTViewerPage       from './pages/NFTViewerPage';
 import CreateWalletPage    from './pages/CreateWalletPage';
 import WalletSettingsPage  from './pages/WalletSettingsPage';
 import CryptoWalletsPage   from './pages/CryptoWalletsPage';
+import CrmPage             from './pages/CrmPage';
 
 function AppContent() {
     const [currentScreen, setCurrentScreen] = useState<'splash' | 'welcome' | 'auth' | 'app'>('splash');
     const [currentPage, setCurrentPage]     = useState<
         'home' | 'wallet' | 'add-nft' | 'alerts' | 'profile' |
-        'nft-viewer' | 'wallet-settings' | 'crypto-wallets'
+        'nft-viewer' | 'wallet-settings' | 'crypto-wallets' | 'crm'
     >('home');
     const [selectedNFT, setSelectedNFT]           = useState<any>(null);
     const [showCreateWallet, setShowCreateWallet] = useState(false);
@@ -65,9 +67,8 @@ function AppContent() {
 
     if (currentScreen === 'app' && checkingWallet) {
         return (
-            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
-                <style>{`@keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}`}</style>
-                <div style={{ width: '50px', height: '50px', border: '3px solid #fff', borderTop: '3px solid #01ff77', borderRadius: '50%', animation: 'spin 1s linear infinite' }} />
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', background: 'var(--bg-page)' }}>
+                <div className="spinner" />
             </div>
         );
     }
@@ -112,24 +113,32 @@ function AppContent() {
                             {currentPage === 'crypto-wallets' && (
                                 <CryptoWalletsPage onBack={() => setCurrentPage('profile')} />
                             )}
+                            {currentPage === 'crm' && (
+                                <CrmPage onBack={() => setCurrentPage('home')} />
+                            )}
 
-                            {!['nft-viewer', 'wallet-settings', 'crypto-wallets'].includes(currentPage) && (
+                            {!['nft-viewer', 'wallet-settings', 'crypto-wallets', 'crm'].includes(currentPage) && (
                                 <div className="bottom-nav">
                                     {([
-                                        { page: 'home',    icon: 'fa-home',        label: 'Home'    },
-                                        { page: 'wallet',  icon: 'fa-wallet',      label: 'Wallet'  },
-                                        { page: 'add-nft', icon: 'fa-plus-circle', label: 'Add NFT' },
-                                        { page: 'alerts',  icon: 'fa-bell',        label: 'Alerts'  },
-                                        { page: 'profile', icon: 'fa-user',        label: 'Profile' },
-                                    ] as const).map(item => (
-                                        <div
+                                        { page: 'home',    icon: <Icon.Home />,   label: 'Home',    show: true,  primary: false },
+                                        { page: 'wallet',  icon: <Icon.Wallet />, label: 'Wallet',  show: true,  primary: false },
+                                        { page: 'add-nft', icon: <Icon.Plus />,   label: 'Add',     show: true,  primary: true },
+                                        { page: 'crm',     icon: <Icon.Truck />,  label: 'CRM',     show: !!currentUser?.companyApproved || !!currentUser?.roles?.length, primary: false },
+                                        { page: 'alerts',  icon: <Icon.Bell />,   label: 'Alerts',  show: true,  primary: false },
+                                        { page: 'profile', icon: <Icon.User />,   label: 'Profile', show: true,  primary: false },
+                                    ] as const).filter(i => i.show).map(item => (
+                                        <button
                                             key={item.page}
                                             className={`nav-item ${currentPage === item.page ? 'active' : ''}`}
                                             onClick={() => navigateTo(item.page)}
                                         >
-                                            <i className={`fas ${item.icon}`}></i>
+                                            {item.primary ? (
+                                                <span className="nav-add">{item.icon}</span>
+                                            ) : (
+                                                item.icon
+                                            )}
                                             <span>{item.label}</span>
-                                        </div>
+                                        </button>
                                     ))}
                                 </div>
                             )}

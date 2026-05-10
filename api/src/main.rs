@@ -2,7 +2,7 @@
 // Remove once all phases are complete.
 #![allow(dead_code)]
 
-use axum::{routing::get, Json, Router};
+use axum::{http::HeaderName, routing::get, Json, Router};
 use std::sync::Arc;
 use tower_http::{cors::CorsLayer, trace::TraceLayer};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -63,10 +63,18 @@ async fn main() -> anyhow::Result<()> {
     });
 
     // ── CORS ──────────────────────────────────────────────────────────────────
+    // `Any` for allow_headers sends `*`, which per the CORS spec does NOT cover
+    // the `Authorization` header — browsers warn and will soon block it.
+    // Listing headers explicitly fixes both the warning and future breakage.
     let cors = CorsLayer::new()
         .allow_origin(tower_http::cors::Any)
         .allow_methods(tower_http::cors::Any)
-        .allow_headers(tower_http::cors::Any);
+        .allow_headers([
+            HeaderName::from_static("authorization"),
+            HeaderName::from_static("content-type"),
+            HeaderName::from_static("accept"),
+            HeaderName::from_static("x-requested-with"),
+        ]);
 
     // ── Router ────────────────────────────────────────────────────────────────
     let app = Router::new()

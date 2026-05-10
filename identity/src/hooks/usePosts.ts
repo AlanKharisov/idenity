@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiGetPosts, apiCreatePost, apiLikePost, apiAddComment } from '../services/apiClient';
+import { moderateText } from '../utils/contentModeration';
 
 export interface PostWithLiked {
     id: string;
@@ -114,7 +115,7 @@ export const usePosts = () => {
     const handleAddComment = async (postId: string, text: string) => {
         if (!currentUser || !text.trim()) return;
         try {
-            const comment = await apiAddComment(postId, text);
+            const comment = await apiAddComment(postId, moderateText(text));
             setPosts(prev => prev.map(p =>
                 p.id === postId
                     ? { ...p, comments: [...(p.comments || []), comment] }

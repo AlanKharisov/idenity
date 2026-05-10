@@ -2,8 +2,11 @@
   "name": "identity",
   "version": "0.1.0",
   "private": true,
-  "homepage": "https://alankharisov.github.io/idenity",
+  "homepage": ".",
   "dependencies": {
+    "@capacitor/android": "^8.3.0",
+    "@capacitor/cli": "^8.3.0",
+    "@capacitor/core": "^8.3.0",
     "@metaplex-foundation/mpl-token-metadata": "^3.4.0",
     "@metaplex-foundation/mpl-toolbox": "^0.9.0",
     "@metaplex-foundation/umi": "^1.5.1",
@@ -54,7 +57,10 @@
     "test": "react-app-rewired test",
     "eject": "react-scripts eject",
     "predeploy": "npm run build",
-    "deploy": "gh-pages -d build"
+    "deploy": "gh-pages -d build",
+    "android": "npm run build && npx cap sync android && npx cap open android",
+    "android:sync": "npm run build && npx cap sync android",
+    "android:open": "npx cap open android"
   },
   "eslintConfig": {
     "extends": [

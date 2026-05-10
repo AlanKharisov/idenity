@@ -23,6 +23,8 @@ export interface UserData {
     companyApproved?: boolean;
     pendingApproval?: boolean;
     deliveryAddress?: string;
+    roles?: string[];
+    companyId?: string;
 }
 
 interface AuthContextType {

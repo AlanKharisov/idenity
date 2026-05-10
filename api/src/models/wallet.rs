@@ -97,6 +97,10 @@ pub struct CodOrderRequest {
     pub nft_id: String,
     pub delivery_address: String,
     pub currency: String,
+    /// Recipient's full name as they want it to appear on the parcel.
+    pub full_name: String,
+    /// Phone number for courier / Nova Poshta SMS.
+    pub phone: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -113,6 +117,22 @@ pub struct CodOrder {
     pub nft_currency: String,
     pub payment_currency: String,
     pub delivery_address: String,
+    pub full_name: String,
+    pub phone: String,
+    /// `pending | in_delivery | completed | cancelled`.
     pub status: String,
     pub created_at: String,
+    /// Set once an owner accepts the order and a Delivery row is created.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delivery_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptCodOrderRequest {
+    pub carrier_type: String,
+    pub np_tracking_number: Option<String>,
+    pub courier_id: Option<String>,
+    pub controller_id: Option<String>,
+    pub nfc_uid: Option<String>,
 }

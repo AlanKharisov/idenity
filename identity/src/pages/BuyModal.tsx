@@ -2,6 +2,13 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { Connection, PublicKey, SystemProgram, Transaction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { apiGetCryptoWallets, apiTransferNFT, apiCashOnDelivery } from '../services/apiClient';
+import { useUmi } from '../hooks/useUmi';
+
+// Solana cluster the on-chain transfer should hit. Must match the cluster
+// useUmi mints on (devnet by default) so wallets line up. Override with
+// REACT_APP_SOLANA_RPC_URL in identity/.env.local if you move to mainnet.
+const SOLANA_RPC_URL =
+    process.env.REACT_APP_SOLANA_RPC_URL || 'https://api.devnet.solana.com';
 
 interface BuyModalProps {
     nft: any;
@@ -21,7 +28,9 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
     const [buying, setBuying]                       = useState(false);
     const [paymentMethod, setPaymentMethod]         = useState<PaymentMethod>('crypto');
     const [fiatCurrency, setFiatCurrency]           = useState<'UAH' | 'USD' | 'SOL'>('UAH');
-    const [deliveryAddress, setDeliveryAddress]     = useState('');
+    const [deliveryAddress, setDeliveryAddress]     = useState(currentUser?.deliveryAddress ?? '');
+    const [fullName, setFullName]                   = useState(currentUser?.name ?? '');
+    const [phone, setPhone]                         = useState(currentUser?.phone ?? '');
 
     const nftCurrency = (nft.currency || 'SOL') as string;
     const nftPrice    = Number(nft.price) || 0;
@@ -46,13 +55,11 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
     const selectedWallet = wallets.find(w => w.id === selectedWalletId);
     const hasFunds       = selectedWallet ? (selectedWallet.balance || 0) >= total : false;
 
+    const { connect: connectPhantom } = useUmi();
+
     const handleBuyCrypto = async () => {
         if (!currentUser || !selectedWalletId || !selectedWallet) return;
 
-        // The seller's Phantom address must be present on the post object.
-        // Ensure your backend populates `sellerAddress` when returning posts
-        // (add it to the Post model and set it from the seller's crypto wallet
-        // when a listing is created).
         const sellerAddress: string | undefined = (nft as any).sellerAddress;
         if (!sellerAddress) {
             alert('❌ Seller wallet address is unavailable — cannot execute on-chain transfer.');
@@ -61,42 +68,71 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
 
         setBuying(true);
         try {
-            // ── Step 1: On-chain SOL transfer via Phantom ──────────────────────
-            const phantom = (window as any).phantom?.solana ?? (window as any).solana;
-            if (!phantom?.isPhantom) throw new Error('Phantom wallet not found. Please install the Phantom extension.');
+            // ── Step 1: Make sure Phantom is connected ─────────────────────────
+            // Don't gate on `isPhantom` — Phantom mobile in-app browser drops
+            // the flag. Trust any Solana provider that returns a publicKey.
+            let phantom = (window as any).phantom?.solana ?? (window as any).solana;
+            if (!phantom) {
+                throw new Error('Phantom wallet not found. Install the Phantom extension or open this app in the Phantom mobile browser.');
+            }
+            if (!phantom.publicKey) {
+                await connectPhantom();
+                phantom = (window as any).phantom?.solana ?? (window as any).solana;
+            }
 
-            const rpcUrl = (import.meta as any).env?.VITE_SOLANA_RPC_URL ?? 'https://api.mainnet-beta.solana.com';
-            const connection = new Connection(rpcUrl, 'confirmed');
+            // ── Step 2: On-chain SOL transfer ──────────────────────────────────
+            console.log('[Buy] connecting to', SOLANA_RPC_URL);
+            const connection = new Connection(SOLANA_RPC_URL, 'confirmed');
 
             const lamports = Math.round(total * LAMPORTS_PER_SOL);
-            const tx = new Transaction().add(
-                SystemProgram.transfer({
-                    fromPubkey: new PublicKey(selectedWallet.address),
-                    toPubkey:   new PublicKey(sellerAddress),
-                    lamports,
-                })
-            );
+            const fromPubkey = new PublicKey(selectedWallet.address);
+            const toPubkey   = new PublicKey(sellerAddress);
+
+            // Sanity check: Phantom must be signing with the same key as the
+            // wallet the user picked in the dropdown.
+            const phantomKey = phantom.publicKey?.toString();
+            if (phantomKey && phantomKey !== selectedWallet.address) {
+                throw new Error(
+                    `Phantom is unlocked for ${phantomKey.slice(0, 8)}…, but you selected wallet ${selectedWallet.address.slice(0, 8)}…. Switch accounts in Phantom and retry.`
+                );
+            }
+
             const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash();
+            const tx = new Transaction().add(
+                SystemProgram.transfer({ fromPubkey, toPubkey, lamports })
+            );
             tx.recentBlockhash = blockhash;
-            tx.feePayer = new PublicKey(selectedWallet.address);
+            tx.feePayer = fromPubkey;
 
+            console.log('[Buy] requesting signature for', lamports, 'lamports');
             const { signature } = await phantom.signAndSendTransaction(tx);
+            console.log('[Buy] tx submitted:', signature);
             await connection.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, 'confirmed');
+            console.log('[Buy] tx confirmed');
 
-            // ── Step 2: Sync off-chain Firestore state ─────────────────────────
+            // ── Step 3: Sync off-chain Firestore state ─────────────────────────
             const walletNftId = nft.walletNftId || nft.id;
-            const sellerId    = nft.userId;   // seller's Firebase UID
-            const postId      = nft.id;       // marketplace post document ID
+            const sellerId    = nft.userId;
+            const postId      = nft.id;
 
             await apiTransferNFT(walletNftId, sellerId, postId);
 
-            // ── Step 3: Update local UI ────────────────────────────────────────
+            // ── Step 4: Update local UI ────────────────────────────────────────
             onSuccess?.({ ...nft, forSale: false, ownerId: currentUser.uid, ownerName: currentUser.email });
             onClose();
-            alert(`✅ You bought "${nft.title}" for ${nftPrice} ${nftCurrency}!`);
+            alert(
+                `✅ Покупка завершена!\n\n` +
+                `NFT: ${nft.title}\nЦена: ${nftPrice} ${nftCurrency}\n` +
+                `TX: ${signature}\n\nNFT в твоём кошельке, продавец получил уведомление.`
+            );
         } catch (err: any) {
-            console.error('Buy error:', err);
-            alert(`❌ Error: ${err.message}`);
+            console.error('[Buy] error:', err);
+            // 4001 = Phantom user-rejected.
+            if (err?.code === 4001) {
+                alert('Транзакция отменена в Phantom.');
+            } else {
+                alert(`❌ Ошибка покупки: ${err?.message ?? err}`);
+            }
         } finally {
             setBuying(false);
         }
@@ -104,10 +140,9 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
 
     const handleCashOnDelivery = async () => {
         if (!currentUser) return;
-        if (!deliveryAddress.trim()) {
-            alert('Please enter your Nova Poshta delivery address.');
-            return;
-        }
+        if (!fullName.trim())        { alert('Please enter the recipient\'s full name.');     return; }
+        if (!phone.trim())           { alert('Please enter a phone number for the courier.'); return; }
+        if (!deliveryAddress.trim()) { alert('Please enter your delivery address.');          return; }
         setBuying(true);
         try {
             await apiCashOnDelivery({
@@ -115,10 +150,12 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
                 nftId:           nft.walletNftId || nft.id,
                 deliveryAddress: deliveryAddress.trim(),
                 currency:        fiatCurrency,
+                fullName:        fullName.trim(),
+                phone:           phone.trim(),
             });
             onSuccess?.(nft);
             onClose();
-            alert(`✅ Order placed! The seller will ship "${nft.title}" to your Nova Poshta address.`);
+            alert(`✅ Order placed! The seller will ship "${nft.title}" to ${fullName.trim()}.`);
         } catch (err: any) {
             console.error('COD error:', err);
             alert(`❌ Error: ${err.message}`);
@@ -176,9 +213,32 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
                     </button>
                 </div>
 
-                {/* Nova Poshta delivery address — shown for both methods */}
+                {/* Recipient details — required for COD, optional for crypto. */}
+                {paymentMethod === 'cod' && (
+                    <>
+                        <div style={{ marginBottom: '10px' }}>
+                            <label style={s.label}>👤 Full Name *</label>
+                            <input
+                                style={s.addrInput}
+                                placeholder="Recipient's full name (for the parcel)"
+                                value={fullName}
+                                onChange={e => setFullName(e.target.value)}
+                            />
+                        </div>
+                        <div style={{ marginBottom: '10px' }}>
+                            <label style={s.label}>📞 Phone *</label>
+                            <input
+                                style={s.addrInput}
+                                placeholder="+380…"
+                                value={phone}
+                                onChange={e => setPhone(e.target.value)}
+                            />
+                        </div>
+                    </>
+                )}
+
                 <div style={{ marginBottom: '14px' }}>
-                    <label style={s.label}>🚚 Nova Poshta Delivery Address {paymentMethod === 'cod' ? '*' : '(optional)'}</label>
+                    <label style={s.label}>🚚 Delivery Address {paymentMethod === 'cod' ? '*' : '(optional)'}</label>
                     <input
                         style={s.addrInput}
                         placeholder="e.g. Nova Poshta #42, Kyiv, Ukraine"

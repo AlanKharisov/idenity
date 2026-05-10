@@ -22,6 +22,12 @@ pub struct NotificationMeta {
     pub currency: Option<String>,
     pub from_user: Option<String>,
     pub batch_count: Option<usize>,
+    // ── COD-specific (let alerts deep-link into CRM) ──────────────────────────
+    pub order_id: Option<String>,
+    pub delivery_id: Option<String>,
+    pub delivery_address: Option<String>,
+    pub buyer_full_name: Option<String>,
+    pub buyer_phone: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
