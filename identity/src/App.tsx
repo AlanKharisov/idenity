@@ -117,7 +117,7 @@ function AppContent() {
                                 <CrmPage onBack={() => setCurrentPage('home')} />
                             )}
 
-                            {!['nft-viewer', 'wallet-settings', 'crypto-wallets', 'crm'].includes(currentPage) && (
+                            {!['nft-viewer', 'wallet-settings', 'crypto-wallets'].includes(currentPage) && (
                                 <div className="bottom-nav">
                                     {([
                                         { page: 'home',    icon: <Icon.Home />,   label: 'Home',    show: true,  primary: false },

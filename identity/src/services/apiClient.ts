@@ -1,8 +1,8 @@
 import { auth } from '../firebase/config';
 
-// Use REACT_APP_API_URL env var for local dev, fall back to production.
-// To run locally: create identity/.env.local with REACT_APP_API_URL=http://localhost:8090
 const BASE_URL = process.env.REACT_APP_API_URL || 'https://idenity-backend.duckdns.org';
+
+console.log('[API] Base URL:', BASE_URL);
 
 async function getToken(): Promise<string | null> {
     try {

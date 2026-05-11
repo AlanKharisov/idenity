@@ -6,6 +6,7 @@ import {
     createUserWithEmailAndPassword,
     updateProfile,
     signOut,
+    deleteUser,
 } from 'firebase/auth';
 import { getLocationFromCoords, getLocationByIP } from '../services/geocoding';
 import { apiRegister, apiMe, apiUpdateProfile } from '../services/apiClient';
@@ -34,7 +35,7 @@ interface AuthContextType {
     register: (email: string, password: string, name: string, username: string, phone?: string) => Promise<{ success: boolean; user?: UserData; error?: string }>;
     logout: () => Promise<{ success: boolean; error?: string }>;
     updateUserLocation: (location: string) => Promise<void>;
-    updateUserProfile:  (data: { name?: string; bio?: string; avatar?: string; username?: string }) => Promise<void>;
+    updateUserProfile:  (data: { name?: string; bio?: string; avatar?: string; username?: string; location?: string }) => Promise<void>;
     refreshLocation:    () => Promise<void>;
 }
 
@@ -105,7 +106,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         } catch (e) { console.error('Location update error:', e); }
     };
 
-    const updateUserProfile = async (data: { name?: string; bio?: string; avatar?: string; username?: string }) => {
+    const updateUserProfile = async (data: { name?: string; bio?: string; avatar?: string; username?: string; location?: string }) => {
         if (!currentUser) return;
         try {
             await apiUpdateProfile(currentUser.uid, data);
@@ -151,8 +152,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const register = async (
         email: string, password: string, name: string, username: string, phone?: string
     ) => {
+        let firebaseUser = null;
         try {
             const result = await createUserWithEmailAndPassword(auth, email, password);
+            firebaseUser = result.user;
             await updateProfile(result.user, { displayName: name });
 
             // Create profile + wallet on Rust backend (public endpoint)
@@ -169,6 +172,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             };
             return { success: true, user: userData };
         } catch (e: any) {
+            // If Firebase user was created but API failed - delete the Firebase user
+            if (firebaseUser) {
+                try { await deleteUser(firebaseUser); } catch { /* ignore */ }
+            }
             return { success: false, error: e.message };
         }
     };

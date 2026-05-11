@@ -12,9 +12,11 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
   const { currentUser, logout, updateUserProfile, refreshLocation } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
-  const [currentPage, setCurrentPage] = useState<'profile' | 'security' | 'company'>('profile');
+  const [currentPage, setCurrentPage] = useState<'profile' | 'security' | 'company' | 'edit-profile'>('profile');
   const [avatarLoading, setAvatarLoading] = useState(false);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [editForm, setEditForm] = useState({ name: '', username: '', bio: '', location: '' });
+  const [saving, setSaving] = useState(false);
 
   const [newPassword, setNewPassword] = useState('');
   const [confirmNewPassword, setConfirmNewPassword] = useState('');
@@ -51,16 +53,35 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
     }
   };
 
-  const editProfile = () => {
-    const newName = prompt('Enter your name:', currentUser.name);
-    if (!newName) return;
-    const newBio = prompt('Enter your bio:', currentUser.bio || '');
-    const newUsername = prompt('Enter your username:', currentUser.username || '');
-    updateUserProfile({
-      name: newName,
-      bio: newBio || currentUser.bio,
-      username: newUsername || currentUser.username,
+  const openEditProfile = () => {
+    setEditForm({
+      name: currentUser.name || '',
+      username: currentUser.username || '',
+      bio: currentUser.bio || '',
+      location: currentUser.location || '',
     });
+    setCurrentPage('edit-profile');
+  };
+
+  const saveProfile = async () => {
+    if (!editForm.name.trim() || !editForm.username.trim()) {
+      alert('Name and username are required');
+      return;
+    }
+    setSaving(true);
+    try {
+      await updateUserProfile({
+        name: editForm.name.trim(),
+        username: editForm.username.trim(),
+        bio: editForm.bio.trim(),
+        location: editForm.location.trim(),
+      });
+      setCurrentPage('profile');
+    } catch (err: any) {
+      alert(`Error: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleLogout = async () => {
@@ -103,7 +124,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
   };
 
   const accountRows: { icon: React.ReactNode; label: string; sub: string; onClick: () => void; badge?: string }[] = [
-    { icon: <Icon.User />, label: 'Edit profile', sub: 'Name, username, bio', onClick: editProfile },
+    { icon: <Icon.User />, label: 'Edit profile', sub: 'Name, username, bio', onClick: openEditProfile },
     { icon: <Icon.Shield />, label: 'Security', sub: twoFactorEnabled ? '2FA enabled' : 'Manage password & 2FA', onClick: () => setCurrentPage('security') },
     { icon: <Icon.Wallet />, label: 'Crypto wallets', sub: 'Connect Phantom & Solflare', onClick: onOpenCryptoWallets },
     { icon: <Icon.CRM />, label: 'Marki Wallet', sub: 'Custodial · Verified', onClick: onOpenWalletSettings },
@@ -111,7 +132,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
   ];
 
   return (
-    <div className="page profile-page active mi-screen-pad" style={{ paddingTop: 16 }}>
+    <div className="page profile-page active mi-screen-pad" style={{ paddingTop: 16, paddingBottom: 100 }}>
       <input
         ref={avatarInputRef}
         type="file"
@@ -309,6 +330,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
             zIndex: 2100,
             overflowY: 'auto',
             padding: '20px',
+            paddingBottom: '120px',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>
@@ -394,6 +416,117 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
         </div>
       )}
 
+      {/* Edit Profile overlay */}
+      {currentPage === 'edit-profile' && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'var(--bg-page)',
+            zIndex: 2100,
+            overflowY: 'auto',
+            padding: '20px',
+            paddingBottom: '120px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
+            <button
+              onClick={() => setCurrentPage('profile')}
+              style={{
+                width: 38,
+                height: 38,
+                borderRadius: 12,
+                background: 'var(--bg-soft)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text)',
+              }}
+              aria-label="Back"
+            >
+              <Icon.ArrowLeft />
+            </button>
+            <h2 className="h2">Редактирование профиля</h2>
+          </div>
+
+          <div className="card" style={{ padding: 20, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+              <div
+                onClick={() => avatarInputRef.current?.click()}
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: '50%',
+                  background: 'var(--primary-soft)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  overflow: 'hidden',
+                  border: '2px solid var(--primary)',
+                }}
+              >
+                {currentUser.avatar ? (
+                  <img src={currentUser.avatar} alt="Avatar" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <Icon.User />
+                )}
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 16 }}>{currentUser.name}</div>
+                <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>@{currentUser.username}</div>
+              </div>
+            </div>
+
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label>Имя</label>
+              <input
+                value={editForm.name}
+                onChange={e => setEditForm({ ...editForm, name: e.target.value })}
+                placeholder="Ваше имя"
+              />
+            </div>
+
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label>Username</label>
+              <input
+                value={editForm.username}
+                onChange={e => setEditForm({ ...editForm, username: e.target.value })}
+                placeholder="@username"
+              />
+            </div>
+
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label>Bio</label>
+              <textarea
+                value={editForm.bio}
+                onChange={e => setEditForm({ ...editForm, bio: e.target.value })}
+                placeholder="Расскажите о себе..."
+                style={{ height: 80, resize: 'none' as any }}
+              />
+            </div>
+
+            <div className="field" style={{ marginBottom: 16 }}>
+              <label>Местоположение</label>
+              <input
+                value={editForm.location}
+                onChange={e => setEditForm({ ...editForm, location: e.target.value })}
+                placeholder="Город, страна"
+              />
+            </div>
+
+            <button
+              onClick={saveProfile}
+              disabled={saving}
+              className="btn btn-primary btn-block"
+              style={{ padding: 14, marginTop: 8 }}
+            >
+              {saving ? 'Сохранение...' : 'Сохранить изменения'}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Company overlay */}
       {currentPage === 'company' && (
         <div
@@ -404,6 +537,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
             zIndex: 2100,
             overflowY: 'auto',
             padding: '20px',
+            paddingBottom: '120px',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18 }}>

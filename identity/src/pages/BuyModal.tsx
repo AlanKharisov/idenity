@@ -28,7 +28,6 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
     const [buying, setBuying]                       = useState(false);
     const [paymentMethod, setPaymentMethod]         = useState<PaymentMethod>('crypto');
     const [fiatCurrency, setFiatCurrency]           = useState<'UAH' | 'USD' | 'SOL'>('UAH');
-    const [deliveryAddress, setDeliveryAddress]     = useState(currentUser?.deliveryAddress ?? '');
     const [fullName, setFullName]                   = useState(currentUser?.name ?? '');
     const [phone, setPhone]                         = useState(currentUser?.phone ?? '');
 
@@ -140,22 +139,21 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
 
     const handleCashOnDelivery = async () => {
         if (!currentUser) return;
-        if (!fullName.trim())        { alert('Please enter the recipient\'s full name.');     return; }
-        if (!phone.trim())           { alert('Please enter a phone number for the courier.'); return; }
-        if (!deliveryAddress.trim()) { alert('Please enter your delivery address.');          return; }
+        if (!fullName.trim())        { alert('Please enter your full name.');     return; }
+        if (!phone.trim())           { alert('Please enter your phone number.'); return; }
         setBuying(true);
         try {
             await apiCashOnDelivery({
                 postId:          nft.id,
                 nftId:           nft.walletNftId || nft.id,
-                deliveryAddress: deliveryAddress.trim(),
+                deliveryAddress: 'COD',
                 currency:        fiatCurrency,
                 fullName:        fullName.trim(),
                 phone:           phone.trim(),
             });
             onSuccess?.(nft);
             onClose();
-            alert(`✅ Order placed! The seller will ship "${nft.title}" to ${fullName.trim()}.`);
+            alert(`✅ Order placed! Seller will contact you for delivery.`);
         } catch (err: any) {
             console.error('COD error:', err);
             alert(`❌ Error: ${err.message}`);
@@ -237,15 +235,7 @@ const BuyModal: React.FC<BuyModalProps> = ({ nft, onClose, onSuccess }) => {
                     </>
                 )}
 
-                <div style={{ marginBottom: '14px' }}>
-                    <label style={s.label}>🚚 Delivery Address {paymentMethod === 'cod' ? '*' : '(optional)'}</label>
-                    <input
-                        style={s.addrInput}
-                        placeholder="e.g. Nova Poshta #42, Kyiv, Ukraine"
-                        value={deliveryAddress}
-                        onChange={e => setDeliveryAddress(e.target.value)}
-                    />
-                </div>
+                
 
                 {/* ── CRYPTO FLOW ─────────────────────────────────────── */}
                 {paymentMethod === 'crypto' && (

@@ -25,14 +25,14 @@ interface CrmPageProps {
 }
 
 const STATUS_LABEL: Record<string, string> = {
-    pending: 'Ожидает',
-    assigned: 'Назначен курьер',
-    picked_up: 'Забрано',
-    in_transit: 'В пути',
-    out_for_delivery: 'У курьера',
-    delivered: 'Доставлено',
-    verified: 'Верифицировано',
-    failed: 'Сбой',
+    pending: 'Pending',
+    assigned: 'Assigned',
+    picked_up: 'Picked Up',
+    in_transit: 'In Transit',
+    out_for_delivery: 'Out for Delivery',
+    delivered: 'Delivered',
+    verified: 'Verified',
+    failed: 'Failed',
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -51,23 +51,24 @@ export default function CrmPage({ onBack }: CrmPageProps) {
     const [tab, setTab] = useState<Tab>('orders');
     const [deliveries, setDeliveries] = useState<Delivery[]>([]);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
     const [selected, setSelected] = useState<Delivery | null>(null);
 
     const refresh = useCallback(async () => {
         setLoading(true);
-        setError(null);
         try {
             const data = await apiListDeliveries();
             setDeliveries(data);
         } catch (e: any) {
-            setError(e?.message ?? 'Не удалось загрузить доставки');
+            console.warn('Deliveries API error:', e);
+            setDeliveries([]);
         } finally {
             setLoading(false);
         }
     }, []);
 
-    useEffect(() => { refresh(); }, [refresh]);
+    useEffect(() => {
+        refresh().catch((e) => console.warn('CRM init error:', e));
+    }, [refresh]);
 
     const isMine = (d: Delivery) => d.sellerId === currentUser?.uid;
 
@@ -92,8 +93,8 @@ export default function CrmPage({ onBack }: CrmPageProps) {
                     ←
                 </button>
                 <div>
-                    <h2 className="h2">Deliveries</h2>
-                    <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>Track physical NFC-linked items</div>
+                    <h2 className="h2">CRM</h2>
+                    <div className="muted" style={{ fontSize: 13, marginTop: 2 }}>Order and delivery management</div>
                 </div>
             </div>
 
@@ -104,13 +105,13 @@ export default function CrmPage({ onBack }: CrmPageProps) {
             </div>
 
             <div style={{ display: 'flex', gap: 4, marginBottom: 16, borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-                <TabBtn active={tab === 'orders'}     onClick={() => setTab('orders')}>New</TabBtn>
-                <TabBtn active={tab === 'deliveries'} onClick={() => setTab('deliveries')}>Shipping</TabBtn>
-                <TabBtn active={tab === 'nfc'}        onClick={() => setTab('nfc')}>NFC link</TabBtn>
-                <TabBtn active={tab === 'verify'}     onClick={() => setTab('verify')}>Verified</TabBtn>
+                <TabBtn active={tab === 'orders'}     onClick={() => setTab('orders')}>Orders</TabBtn>
+                <TabBtn active={tab === 'deliveries'} onClick={() => setTab('deliveries')}>Deliveries</TabBtn>
+                <TabBtn active={tab === 'nfc'}        onClick={() => setTab('nfc')}>NFC</TabBtn>
+                <TabBtn active={tab === 'verify'}     onClick={() => setTab('verify')}>Verify</TabBtn>
             </div>
 
-            {error && <div style={errBox}>{error}</div>}
+            {loading && <div style={{ textAlign: 'center', padding: 20, color: 'var(--text-muted)' }}>Loading...</div>}
 
             {tab === 'orders' && (
                 <OrdersTab
@@ -148,12 +149,16 @@ function OrdersTab({ onOrderAccepted }: { onOrderAccepted: () => void }) {
         try {
             const data = await apiListCodOrders();
             setOrders(data);
+        } catch (e: any) {
+            console.warn('Orders loading error:', e);
         } finally {
             setLoading(false);
         }
     }, []);
 
-    useEffect(() => { refresh(); }, [refresh]);
+    useEffect(() => {
+        refresh().catch((e) => console.warn('Orders init error:', e));
+    }, [refresh]);
 
     const myOrders = orders.filter(o => o.sellerId === currentUser?.uid);
     const pending  = myOrders.filter(o => o.status === 'pending');
@@ -162,18 +167,17 @@ function OrdersTab({ onOrderAccepted }: { onOrderAccepted: () => void }) {
     return (
         <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-                <button onClick={refresh} style={btnSecondary}>↻ Обновить</button>
+                <button onClick={refresh} style={btnSecondary}>↻ Refresh</button>
                 <span style={{ color: '#aaa', fontSize: 13 }}>
-                    Ожидают: {pending.length} · В доставке: {inFlight.length}
+                    Pending: {pending.length} · In delivery: {inFlight.length}
                 </span>
             </div>
 
-            {loading && <div>Загрузка...</div>}
+            {loading && <div>Loading...</div>}
 
             {!loading && pending.length === 0 && (
                 <div style={{ color: '#aaa', padding: 20, textAlign: 'center' }}>
-                    Нет новых заказов. Они появляются автоматически, когда покупатели
-                    оформляют COD-покупку через приложение.
+                    No new orders. They appear automatically when buyers place COD orders through the app.
                 </div>
             )}
 
@@ -239,26 +243,26 @@ function OrderCard({ order, accepting, onStartAccept, onCancelAccept, onAccepted
                     </div>
                 </div>
                 {!accepting && (
-                    <button onClick={onStartAccept} style={btnPrimary}>Принять</button>
+                    <button onClick={onStartAccept} style={btnPrimary}>Accept</button>
                 )}
             </div>
 
             {accepting && (
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid #333' }}>
                     <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                        <button onClick={() => setCarrierType('self')}        style={carrierType === 'self'        ? btnPrimary : btnSecondary}>Сами везём</button>
-                        <button onClick={() => setCarrierType('nova_poshta')} style={carrierType === 'nova_poshta' ? btnPrimary : btnSecondary}>Нова Пошта</button>
+                        <button onClick={() => setCarrierType('self')}        style={carrierType === 'self'        ? btnPrimary : btnSecondary}>Self delivery</button>
+                        <button onClick={() => setCarrierType('nova_poshta')} style={carrierType === 'nova_poshta' ? btnPrimary : btnSecondary}>Nova Poshta</button>
                     </div>
                     {carrierType === 'nova_poshta' ? (
-                        <input value={ttn}       onChange={e => setTtn(e.target.value)}       placeholder="ТТН Новой Пошты"          style={input} />
+                        <input value={ttn}       onChange={e => setTtn(e.target.value)}       placeholder="Nova Poshta tracking #"          style={input} />
                     ) : (
-                        <input value={courierId} onChange={e => setCourierId(e.target.value)} placeholder="UID курьера (опційно)"   style={input} />
+                        <input value={courierId} onChange={e => setCourierId(e.target.value)} placeholder="Courier UID (optional)"   style={input} />
                     )}
-                    <input value={nfcUid} onChange={e => setNfcUid(e.target.value)} placeholder="NFC UID метки (опційно)" style={input} />
+                    <input value={nfcUid} onChange={e => setNfcUid(e.target.value)} placeholder="NFC UID tag (optional)" style={input} />
                     {err && <div style={errBox}>{err}</div>}
                     <div style={{ display: 'flex', gap: 8 }}>
-                        <button disabled={busy} onClick={accept}         style={btnPrimary}>✓ Создать доставку</button>
-                        <button disabled={busy} onClick={onCancelAccept} style={btnSecondary}>Отмена</button>
+                        <button disabled={busy} onClick={accept}         style={btnPrimary}>✓ Create delivery</button>
+                        <button disabled={busy} onClick={onCancelAccept} style={btnSecondary}>Cancel</button>
                     </div>
                 </div>
             )}
@@ -307,11 +311,11 @@ function DeliveriesTab({ loading, deliveries, onRefresh, selected, setSelected, 
                 />
             )}
 
-            {loading && <div>Загрузка...</div>}
+            {loading && <div>Loading...</div>}
 
             {!loading && deliveries.length === 0 && (
                 <div style={{ color: '#aaa', padding: 20, textAlign: 'center' }}>
-                    Доставок пока нет. Создайте первую через кнопку «+ Новая доставка».
+                    No deliveries yet. Create the first one using the "+ New delivery" button.
                 </div>
             )}
 
@@ -322,18 +326,18 @@ function DeliveriesTab({ loading, deliveries, onRefresh, selected, setSelected, 
                             <div>
                                 <div style={{ fontWeight: 600 }}>{d.nftTitle}</div>
                                 <div style={{ fontSize: 12, color: '#aaa' }}>
-                                    Покупатель: {d.buyerName} · {d.deliveryAddress}
+                                    Buyer: {d.buyerName} · {d.deliveryAddress}
                                 </div>
                                 <div style={{ fontSize: 12, color: '#aaa' }}>
-                                    Перевозчик: {d.carrierType === 'self'
-                                        ? `Своя доставка${d.courierName ? ` · ${d.courierName}` : ''}`
-                                        : `Нова Пошта${d.npTrackingNumber ? ` · ${d.npTrackingNumber}` : ''}`}
+                                    Carrier: {d.carrierType === 'self'
+                                        ? `Self delivery${d.courierName ? ` · ${d.courierName}` : ''}`
+                                        : `Nova Poshta${d.npTrackingNumber ? ` · ${d.npTrackingNumber}` : ''}`}
                                 </div>
                             </div>
                             <StatusBadge status={d.status} />
                         </div>
                         <div style={{ fontSize: 11, color: '#666', marginTop: 6 }}>
-                            Обновлено {formatTime(d.updatedAt)} · Чекпоинтов: {d.checkpoints.length}
+                            Updated {formatTime(d.updatedAt)} · Checkpoints: {d.checkpoints.length}
                         </div>
                     </div>
                 ))}
@@ -398,18 +402,18 @@ function DeliveryDetail({ delivery, onBack, onChanged, currentUid }: {
 
     return (
         <div>
-            <button onClick={onBack} style={btnGhost}>← К списку</button>
+            <button onClick={onBack} style={btnGhost}>← Back to list</button>
 
             <div style={{ ...card, marginTop: 12 }}>
                 <h3 style={{ margin: '0 0 8px' }}>{delivery.nftTitle}</h3>
                 <StatusBadge status={delivery.status} />
                 <div style={{ marginTop: 12, fontSize: 14, color: '#ccc', display: 'grid', gap: 4 }}>
-                    <div>Покупатель: <b>{delivery.buyerName}</b></div>
-                    <div>Адрес: {delivery.deliveryAddress}</div>
-                    <div>Перевозчик: {delivery.carrierType === 'self' ? 'Своя доставка' : 'Нова Пошта'}</div>
-                    {delivery.courierName    && <div>Курьер: {delivery.courierName}</div>}
-                    {delivery.controllerName && <div>Контролёр: {delivery.controllerName}</div>}
-                    {delivery.npTrackingNumber && <div>ТТН: {delivery.npTrackingNumber}</div>}
+                    <div>Buyer: <b>{delivery.buyerName}</b></div>
+                    <div>Address: {delivery.deliveryAddress}</div>
+                    <div>Carrier: {delivery.carrierType === 'self' ? 'Self delivery' : 'Nova Poshta'}</div>
+                    {delivery.courierName    && <div>Courier: {delivery.courierName}</div>}
+                    {delivery.controllerName && <div>Controller: {delivery.controllerName}</div>}
+                    {delivery.npTrackingNumber && <div>Tracking #: {delivery.npTrackingNumber}</div>}
                     {delivery.nfcUid && <div>NFC UID: <code>{delivery.nfcUid}</code></div>}
                 </div>
             </div>
@@ -420,20 +424,20 @@ function DeliveryDetail({ delivery, onBack, onChanged, currentUid }: {
 
             {canModify && (
                 <div style={{ ...card, marginTop: 12 }}>
-                    <h4 style={{ margin: '0 0 8px' }}>Добавить чекпоинт</h4>
-                    <input value={cpStatus}   onChange={e => setCpStatus(e.target.value)}   placeholder="Статус (напр. Прибыл в Киев)"          style={input} />
-                    <input value={cpLocation} onChange={e => setCpLocation(e.target.value)} placeholder="Локация (напр. Сортувальний центр Київ)" style={input} />
-                    <input value={cpNote}     onChange={e => setCpNote(e.target.value)}     placeholder="Примітка (опційно)"                     style={input} />
+                    <h4 style={{ margin: '0 0 8px' }}>Add checkpoint</h4>
+                    <input value={cpStatus}   onChange={e => setCpStatus(e.target.value)}   placeholder="Status (e.g. Arrived in Kyiv)"          style={input} />
+                    <input value={cpLocation} onChange={e => setCpLocation(e.target.value)} placeholder="Location (e.g. Sorting center)" style={input} />
+                    <input value={cpNote}     onChange={e => setCpNote(e.target.value)}     placeholder="Note (optional)"                     style={input} />
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                        <button disabled={busy} onClick={addCheckpoint} style={btnPrimary}>+ Добавить</button>
+                        <button disabled={busy} onClick={addCheckpoint} style={btnPrimary}>+ Add</button>
                         {delivery.carrierType === 'nova_poshta' && (
-                            <button disabled={busy} onClick={syncNp} style={btnSecondary}>↻ Синхр. с Новой Поштой</button>
+                            <button disabled={busy} onClick={syncNp} style={btnSecondary}>↻ Sync Nova Poshta</button>
                         )}
                         {!['delivered', 'verified'].includes(delivery.status) && (
                             <>
-                                <button disabled={busy} onClick={() => setStatus('out_for_delivery')} style={btnSecondary}>У курьера</button>
-                                <button disabled={busy} onClick={() => setStatus('delivered')}        style={btnSecondary}>Доставлено</button>
-                                <button disabled={busy} onClick={() => setStatus('failed')}           style={btnDanger}>Сбой</button>
+                                <button disabled={busy} onClick={() => setStatus('out_for_delivery')} style={btnSecondary}>Out for delivery</button>
+                                <button disabled={busy} onClick={() => setStatus('delivered')}        style={btnSecondary}>Delivered</button>
+                                <button disabled={busy} onClick={() => setStatus('failed')}           style={btnDanger}>Failed</button>
                             </>
                         )}
                     </div>
@@ -442,17 +446,17 @@ function DeliveryDetail({ delivery, onBack, onChanged, currentUid }: {
 
             {isBuyer && !delivery.customerReceived && (
                 <div style={{ ...card, marginTop: 12, borderColor: '#01ff77' }}>
-                    <h4 style={{ margin: '0 0 8px', color: '#01ff77' }}>Я получил товар</h4>
+                    <h4 style={{ margin: '0 0 8px', color: '#01ff77' }}>I received the item</h4>
                     <p style={{ fontSize: 13, color: '#aaa', margin: '0 0 8px' }}>
-                        Подтвердите получение либо тапните NFC-меткой во вкладке «Верификация».
+                        Confirm receipt or tap NFC tag in the Verify tab.
                     </p>
-                    <button disabled={busy} onClick={confirm} style={btnPrimary}>✓ Подтвердить получение</button>
+                    <button disabled={busy} onClick={confirm} style={btnPrimary}>✓ Confirm receipt</button>
                 </div>
             )}
 
             <div style={{ ...card, marginTop: 12 }}>
-                <h4 style={{ margin: '0 0 8px' }}>История перемещений</h4>
-                {delivery.checkpoints.length === 0 && <div style={{ color: '#aaa' }}>Чекпоинтов пока нет</div>}
+                <h4 style={{ margin: '0 0 8px' }}>Tracking history</h4>
+                {delivery.checkpoints.length === 0 && <div style={{ color: '#aaa' }}>No checkpoints yet</div>}
                 <div style={{ display: 'grid', gap: 8 }}>
                     {[...delivery.checkpoints].reverse().map(cp => (
                         <div key={cp.id} style={{ borderLeft: '3px solid #01ff77', paddingLeft: 10 }}>
@@ -498,18 +502,18 @@ function CarrierEditor({ delivery, onChanged }: { delivery: Delivery; onChanged:
 
     return (
         <div style={{ ...card, marginTop: 12 }}>
-            <h4 style={{ margin: '0 0 8px' }}>Перевозчик</h4>
+            <h4 style={{ margin: '0 0 8px' }}>Carrier</h4>
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <button onClick={() => setCarrierType('self')}        style={carrierType === 'self'        ? btnPrimary : btnSecondary}>Сами везём</button>
-                <button onClick={() => setCarrierType('nova_poshta')} style={carrierType === 'nova_poshta' ? btnPrimary : btnSecondary}>Нова Пошта</button>
+                <button onClick={() => setCarrierType('self')}        style={carrierType === 'self'        ? btnPrimary : btnSecondary}>Self delivery</button>
+                <button onClick={() => setCarrierType('nova_poshta')} style={carrierType === 'nova_poshta' ? btnPrimary : btnSecondary}>Nova Poshta</button>
             </div>
             {carrierType === 'nova_poshta' ? (
-                <input value={ttn}          onChange={e => setTtn(e.target.value)}          placeholder="ТТН Новой Пошты" style={input} />
+                <input value={ttn}          onChange={e => setTtn(e.target.value)}          placeholder="Nova Poshta tracking #" style={input} />
             ) : (
-                <input value={courierId}    onChange={e => setCourierId(e.target.value)}    placeholder="UID курьера"     style={input} />
+                <input value={courierId}    onChange={e => setCourierId(e.target.value)}    placeholder="Courier UID"     style={input} />
             )}
-            <input value={controllerId} onChange={e => setControllerId(e.target.value)} placeholder="UID контролёра (опційно)" style={input} />
-            <button disabled={busy} onClick={save} style={btnPrimary}>Сохранить</button>
+            <input value={controllerId} onChange={e => setControllerId(e.target.value)} placeholder="Controller UID (optional)" style={input} />
+            <button disabled={busy} onClick={save} style={btnPrimary}>Save</button>
         </div>
     );
 }
@@ -531,7 +535,7 @@ function CreateDeliveryForm({ onCancel, onCreated }: { onCancel: () => void; onC
     const [err, setErr] = useState<string | null>(null);
 
     useEffect(() => {
-        apiGetNFTs().then(setNfts).catch(() => setNfts([]));
+        apiGetNFTs().then(setNfts).catch((e) => { console.warn('NFTs error:', e); setNfts([]); });
     }, []);
 
     async function submit() {
@@ -549,7 +553,7 @@ function CreateDeliveryForm({ onCancel, onCreated }: { onCancel: () => void; onC
             });
             onCreated(d);
         } catch (e: any) {
-            setErr(e?.message ?? 'Ошибка создания');
+            setErr(e?.message ?? 'Create error');
         } finally {
             setBusy(false);
         }
@@ -557,29 +561,29 @@ function CreateDeliveryForm({ onCancel, onCreated }: { onCancel: () => void; onC
 
     return (
         <div style={{ ...card, marginBottom: 12 }}>
-            <h4 style={{ margin: '0 0 8px' }}>Новая доставка</h4>
+            <h4 style={{ margin: '0 0 8px' }}>New delivery</h4>
             <select value={nftId} onChange={e => setNftId(e.target.value)} style={input}>
-                <option value="">— Выберите NFT —</option>
+                <option value="">— Select NFT —</option>
                 {nfts.map((n: any) => (
                     <option key={n.id} value={n.id}>{n.title}</option>
                 ))}
             </select>
-            <input value={buyerId}   onChange={e => setBuyerId(e.target.value)}   placeholder="UID покупателя"    style={input} />
-            <input value={address}   onChange={e => setAddress(e.target.value)}   placeholder="Адрес доставки"    style={input} />
+            <input value={buyerId}   onChange={e => setBuyerId(e.target.value)}   placeholder="Buyer UID"    style={input} />
+            <input value={address}   onChange={e => setAddress(e.target.value)}   placeholder="Delivery address"    style={input} />
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <button onClick={() => setCarrierType('self')}        style={carrierType === 'self'        ? btnPrimary : btnSecondary}>Сами везём</button>
-                <button onClick={() => setCarrierType('nova_poshta')} style={carrierType === 'nova_poshta' ? btnPrimary : btnSecondary}>Нова Пошта</button>
+                <button onClick={() => setCarrierType('self')}        style={carrierType === 'self'        ? btnPrimary : btnSecondary}>Self delivery</button>
+                <button onClick={() => setCarrierType('nova_poshta')} style={carrierType === 'nova_poshta' ? btnPrimary : btnSecondary}>Nova Poshta</button>
             </div>
             {carrierType === 'nova_poshta' ? (
-                <input value={ttn}       onChange={e => setTtn(e.target.value)}       placeholder="ТТН"          style={input} />
+                <input value={ttn}       onChange={e => setTtn(e.target.value)}       placeholder="Tracking #"          style={input} />
             ) : (
-                <input value={courierId} onChange={e => setCourierId(e.target.value)} placeholder="UID курьера" style={input} />
+                <input value={courierId} onChange={e => setCourierId(e.target.value)} placeholder="Courier UID" style={input} />
             )}
-            <input value={nfcUid} onChange={e => setNfcUid(e.target.value)} placeholder="NFC UID метки (опційно)" style={input} />
+            <input value={nfcUid} onChange={e => setNfcUid(e.target.value)} placeholder="NFC UID tag (optional)" style={input} />
             {err && <div style={errBox}>{err}</div>}
             <div style={{ display: 'flex', gap: 8 }}>
-                <button disabled={busy} onClick={submit} style={btnPrimary}>Создать</button>
-                <button disabled={busy} onClick={onCancel} style={btnSecondary}>Отмена</button>
+                <button disabled={busy} onClick={submit} style={btnPrimary}>Create</button>
+                <button disabled={busy} onClick={onCancel} style={btnSecondary}>Cancel</button>
             </div>
         </div>
     );
@@ -597,7 +601,7 @@ function NfcBindTab() {
     const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
 
     useEffect(() => {
-        apiGetNFTs().then(setNfts).catch(() => setNfts([]));
+        apiGetNFTs().then(setNfts).catch((e) => { console.warn('NFTs error:', e); setNfts([]); });
     }, []);
 
     async function bind() {
@@ -605,10 +609,10 @@ function NfcBindTab() {
         setBusy(true); setMsg(null);
         try {
             const r = await apiBindNfc({ nftId, nfcUid: uid });
-            setMsg({ kind: 'ok', text: `Привязано: UID ${r.nfcUid}` });
+            setMsg({ kind: 'ok', text: `Bound: UID ${r.nfcUid}` });
             setUid('');
         } catch (e: any) {
-            setMsg({ kind: 'err', text: e?.message ?? 'Ошибка' });
+            setMsg({ kind: 'err', text: e?.message ?? 'Error' });
         } finally {
             setBusy(false);
         }
@@ -616,20 +620,20 @@ function NfcBindTab() {
 
     return (
         <div style={card}>
-            <h4 style={{ margin: '0 0 8px' }}>Привязать NFC-метку к NFT</h4>
+            <h4 style={{ margin: '0 0 8px' }}>Bind NFC tag to NFT</h4>
             <p style={{ fontSize: 12, color: '#aaa' }}>
-                MVP: NTAG 216, проверка по UID. Для production-защиты от копирования
-                переходим на NTAG 424 DNA с CMAC.
+                MVP: NTAG 216, UID verification. For production copy protection,
+                we will move to NTAG 424 DNA with CMAC.
             </p>
             <select value={nftId} onChange={e => setNftId(e.target.value)} style={input}>
-                <option value="">— Выберите NFT —</option>
+                <option value="">— Select NFT —</option>
                 {nfts.map((n: any) => (
                     <option key={n.id} value={n.id}>{n.title}</option>
                 ))}
             </select>
-            <input value={uid} onChange={e => setUid(e.target.value)} placeholder="UID (напр. 04:A1:B2:C3:D4:E5:80)" style={input} />
+            <input value={uid} onChange={e => setUid(e.target.value)} placeholder="UID (e.g. 04:A1:B2:C3:D4:E5:80)" style={input} />
             {msg && <div style={msg.kind === 'ok' ? okBox : errBox}>{msg.text}</div>}
-            <button disabled={busy} onClick={bind} style={btnPrimary}>Привязать</button>
+            <button disabled={busy} onClick={bind} style={btnPrimary}>Bind</button>
         </div>
     );
 }
@@ -649,7 +653,7 @@ function NfcVerifyTab() {
         if (useWebNfc) {
             // @ts-ignore – Web NFC is non-standard but works on Chrome Android
             if (typeof NDEFReader === 'undefined') {
-                setErr('Web NFC недоступен на этом устройстве. Введите UID вручную.');
+                setErr('Web NFC not available on this device. Enter UID manually.');
                 return;
             }
             try {
@@ -662,7 +666,7 @@ function NfcVerifyTab() {
                     submit(serial);
                 };
             } catch (e: any) {
-                setErr('Не удалось запустить NFC: ' + (e?.message ?? 'unknown'));
+                setErr('Could not start NFC: ' + (e?.message ?? 'unknown'));
             }
         } else {
             submit(uid);
@@ -676,7 +680,7 @@ function NfcVerifyTab() {
             const r = await apiVerifyNfc(value);
             setResult(r);
         } catch (e: any) {
-            setErr(e?.message ?? 'Ошибка верификации');
+            setErr(e?.message ?? 'Verification error');
         } finally {
             setBusy(false);
         }
@@ -684,25 +688,25 @@ function NfcVerifyTab() {
 
     return (
         <div style={card}>
-            <h4 style={{ margin: '0 0 8px' }}>Верификация подлинности / приём товара</h4>
+            <h4 style={{ margin: '0 0 8px' }}>Authenticity verification / item receipt</h4>
             <p style={{ fontSize: 12, color: '#aaa' }}>
-                Поднесите телефон к метке (Android) или вставьте UID вручную. Если у вас
-                есть открытая доставка с этим NFT — она автоматически закроется.
+                Tap your phone to the tag (Android) or enter UID manually. If you have
+                an open delivery for this NFT — it will automatically close.
             </p>
-            <input value={uid} onChange={e => setUid(e.target.value)} placeholder="UID (или нажмите «Сканировать»)" style={input} />
+            <input value={uid} onChange={e => setUid(e.target.value)} placeholder="UID (or tap Scan)" style={input} />
             <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-                <button disabled={busy} onClick={() => verify(true)}  style={btnPrimary}>Сканировать</button>
-                <button disabled={busy} onClick={() => verify(false)} style={btnSecondary}>Проверить вручную</button>
+                <button disabled={busy} onClick={() => verify(true)}  style={btnPrimary}>Scan</button>
+                <button disabled={busy} onClick={() => verify(false)} style={btnSecondary}>Verify manually</button>
             </div>
             {err && <div style={errBox}>{err}</div>}
             {result && (
                 <div style={okBox}>
                     <b>{result.nftTitle}</b><br />
-                    Владелец: {result.ownerName}<br />
+                    Owner: {result.ownerName}<br />
                     {result.mintAddress && <>Mint: <code>{result.mintAddress.slice(0, 12)}…</code><br /></>}
                     {result.autoConfirmedReceipt
-                        ? '✓ Доставка автоматически отмечена как полученная'
-                        : 'Подлинность подтверждена'}
+                        ? '✓ Delivery automatically marked as received'
+                        : 'Authenticity confirmed'}
                 </div>
             )}
         </div>
