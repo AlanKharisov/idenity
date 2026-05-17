@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import QRCode from 'qrcode';
 import { useAuth } from '../context/AuthContext';
 import { formatTime } from '../utils/formatters';
 import {
@@ -599,6 +600,7 @@ function NfcBindTab() {
     const [uid, setUid] = useState('');
     const [busy, setBusy] = useState(false);
     const [msg, setMsg] = useState<{ kind: 'ok' | 'err'; text: string } | null>(null);
+    const [qrCodeUrl, setQrCodeUrl] = useState<string | null>(null);
 
     useEffect(() => {
         apiGetNFTs().then(setNfts).catch((e) => { console.warn('NFTs error:', e); setNfts([]); });
@@ -606,10 +608,20 @@ function NfcBindTab() {
 
     async function bind() {
         if (!nftId || !uid) return;
-        setBusy(true); setMsg(null);
+        setBusy(true); setMsg(null); setQrCodeUrl(null);
         try {
             const r = await apiBindNfc({ nftId, nfcUid: uid });
             setMsg({ kind: 'ok', text: `Bound: UID ${r.nfcUid}` });
+            
+            // Generate test QR code
+            try {
+                const qrUrl = `https://alankharisov.github.io/idenity/?nfc=${r.nfcUid}`;
+                const dataUrl = await QRCode.toDataURL(qrUrl, { margin: 1, width: 200, color: { dark: '#000000', light: '#ffffff' } });
+                setQrCodeUrl(dataUrl);
+            } catch (err) {
+                console.warn('Failed to generate QR code', err);
+            }
+            
             setUid('');
         } catch (e: any) {
             setMsg({ kind: 'err', text: e?.message ?? 'Error' });
@@ -634,6 +646,14 @@ function NfcBindTab() {
             <input value={uid} onChange={e => setUid(e.target.value)} placeholder="UID (e.g. 04:A1:B2:C3:D4:E5:80)" style={input} />
             {msg && <div style={msg.kind === 'ok' ? okBox : errBox}>{msg.text}</div>}
             <button disabled={busy} onClick={bind} style={btnPrimary}>Bind</button>
+
+            {qrCodeUrl && (
+                <div style={{ marginTop: 24, textAlign: 'center', background: 'var(--bg-card)', padding: 16, borderRadius: 12, border: '1px solid var(--border)' }}>
+                    <h5 style={{ margin: '0 0 12px', color: 'var(--text)', fontSize: 14 }}>Test QR Code for Scanner</h5>
+                    <p style={{ margin: '0 0 16px', fontSize: 12, color: 'var(--text-muted)' }}>Scan this directly with the in-app QR Scanner to simulate an NFC tap.</p>
+                    <img src={qrCodeUrl} alt="Test QR Code" style={{ borderRadius: 8, display: 'block', margin: '0 auto', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} />
+                </div>
+            )}
         </div>
     );
 }

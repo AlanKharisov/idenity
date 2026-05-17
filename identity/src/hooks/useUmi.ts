@@ -3,7 +3,7 @@ import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import { mplTokenMetadata } from '@metaplex-foundation/mpl-token-metadata';
 import { walletAdapterIdentity } from '@metaplex-foundation/umi-signer-wallet-adapters';
 
-const DEVNET_RPC = 'https://api.devnet.solana.com';
+const DEVNET_RPC = process.env.REACT_APP_SOLANA_RPC || 'https://api.devnet.solana.com';
 
 function getPhantom(): any {
     return (window as any).phantom?.solana ?? (window as any).solana ?? null;

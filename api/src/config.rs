@@ -24,9 +24,15 @@ pub struct Config {
     pub port: u16,
     /// The React dev/prod origin allowed by CORS, e.g. `http://localhost:3000`.
     pub allowed_origin: String,
+    /// Firebase UIDs allowed to access `/api/admin/*`. Comma-separated in env.
+    pub admin_uids: Vec<String>,
 }
 
 impl Config {
+    pub fn is_admin(&self, uid: &str) -> bool {
+        self.admin_uids.iter().any(|a| a == uid)
+    }
+
     /// Build Config from environment variables.
     /// Panics at startup (via `?`) if any required variable is missing or malformed.
     pub fn from_env() -> Result<Arc<Self>> {
@@ -72,6 +78,13 @@ impl Config {
                 .context("PORT must be a valid u16")?,
             allowed_origin: std::env::var("ALLOWED_ORIGIN")
                 .unwrap_or_else(|_| "http://localhost:3000".to_owned()),
+            admin_uids: std::env::var("ADMIN_UIDS")
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .collect(),
         }))
     }
 }
+

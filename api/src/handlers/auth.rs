@@ -106,6 +106,17 @@ pub async fn register(
         pending_approval: false,
         roles: Vec::new(),
         company_id: None,
+        banned: false,
+        company_name: None,
+        registration_number: None,
+        contact_email: None,
+        business_description: None,
+        approval_requested_at: None,
+        reviewed_at: None,
+        reviewed_by: None,
+        approval_status: None,
+        rejection_reason: None,
+        ban_reason: None,
     };
 
     let user_value = serde_json::to_value(&user).map_err(|e| AppError::Internal(e.into()))?;

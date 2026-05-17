@@ -90,6 +90,7 @@ export const apiGetMintInfo = () => get<{
 }>('/api/nfts/mint-info');
 
 export const apiGetNFTs   = ()                            => get<any[]>('/api/nfts');
+export const apiGetNFT    = (id: string)                   => get<any>(`/api/nfts/${id}`);
 export const apiCreateNFT = (form: FormData)              => postForm<any>('/api/nfts', form);
 export const apiUpdateNFT = (id: string, d: any)          => put<any>(`/api/nfts/${id}`, d);
 export const apiDeleteNFT = (id: string)                  => del<any>(`/api/nfts/${id}`);

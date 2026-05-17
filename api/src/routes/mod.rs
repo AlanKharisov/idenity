@@ -7,7 +7,7 @@ use axum::{
 use std::sync::Arc;
 
 use crate::{
-    handlers::{ai, auth, cod_orders, deliveries, marketplace, nfc, notifications, nfts, posts, profile, wallets},
+    handlers::{admin, ai, auth, cod_orders, deliveries, marketplace, nfc, notifications, nfts, posts, profile, wallets},
     middleware::auth::auth_middleware,
     AppState,
 };
@@ -83,6 +83,14 @@ pub fn api_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/notifications/read-all", put(notifications::mark_all_read))
         .route("/notifications/:id/read", put(notifications::mark_read))
         .route("/notifications/:id", delete(notifications::delete_notification))
+        // Admin — gated inside each handler via ADMIN_UIDS check
+        .route("/admin/me",                       get(admin::me))
+        .route("/admin/companies",                get(admin::list_companies))
+        .route("/admin/companies/:uid",           get(admin::get_company))
+        .route("/admin/companies/:uid/approve",   post(admin::approve))
+        .route("/admin/companies/:uid/reject",    post(admin::reject))
+        .route("/admin/companies/:uid/ban",       post(admin::ban))
+        .route("/admin/companies/:uid/unban",     post(admin::unban))
         // Attach auth middleware to ALL routes in this sub-router.
         .layer(middleware::from_fn_with_state(
             state.clone(),

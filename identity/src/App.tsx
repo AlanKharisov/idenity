@@ -32,7 +32,14 @@ function AppContent() {
 
     useEffect(() => {
         if (!loading && currentUser) setCurrentScreen('app');
-    }, [currentUser, loading]);
+        if (!loading && !currentUser && currentScreen === 'app') {
+            setCurrentScreen('auth');
+            setCurrentPage('home');
+            setShowCreateWallet(false);
+            setSelectedNFT(null);
+            setNftToSell(null);
+        }
+    }, [currentUser, loading, currentScreen]);
 
     useEffect(() => {
         const checkWallet = async () => {

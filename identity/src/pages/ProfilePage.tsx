@@ -2,6 +2,7 @@ import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { apiUploadAvatar, apiChangePassword, apiRequestApproval } from '../services/apiClient';
 import { Icon } from '../components/brand';
+import QrScannerPage from './QrScannerPage';
 
 interface ProfilePageProps {
   onOpenWalletSettings: () => void;
@@ -12,7 +13,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
   const { currentUser, logout, updateUserProfile, refreshLocation } = useAuth();
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
-  const [currentPage, setCurrentPage] = useState<'profile' | 'security' | 'company' | 'edit-profile'>('profile');
+  const [currentPage, setCurrentPage] = useState<'profile' | 'security' | 'company' | 'edit-profile' | 'qr-scanner'>('profile');
   const [avatarLoading, setAvatarLoading] = useState(false);
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', username: '', bio: '', location: '' });
@@ -129,6 +130,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
     { icon: <Icon.Wallet />, label: 'Crypto wallets', sub: 'Connect Phantom & Solflare', onClick: onOpenCryptoWallets },
     { icon: <Icon.CRM />, label: 'Marki Wallet', sub: 'Custodial · Verified', onClick: onOpenWalletSettings },
     { icon: <Icon.Globe />, label: 'Company approval', sub: currentUser.companyApproved ? 'Verified' : currentUser.pendingApproval ? 'Pending review' : 'Submit a request', onClick: () => setCurrentPage('company') },
+    { icon: <Icon.Scan />, label: 'QR Scanner', sub: 'Сканировать QR-код камерой', onClick: () => setCurrentPage('qr-scanner') },
   ];
 
   return (
@@ -628,6 +630,11 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ onOpenWalletSettings, onOpenC
             </div>
           )}
         </div>
+      )}
+
+      {/* QR Scanner overlay */}
+      {currentPage === 'qr-scanner' && (
+        <QrScannerPage onClose={() => setCurrentPage('profile')} />
       )}
     </div>
   );

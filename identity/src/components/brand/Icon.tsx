@@ -113,6 +113,9 @@ export const Icon = {
   Refresh: ({ size, ...p }: IconProps) => (
     <svg {...base(size)} {...p}><path d="M3 12a9 9 0 109-9 9 9 0 00-6.4 2.6L3 8" /><path d="M3 3v5h5" /></svg>
   ),
+  Scan: ({ size, ...p }: IconProps) => (
+    <svg {...base(size)} {...p}><path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" /><line x1="7" y1="12" x2="17" y2="12" /></svg>
+  ),
 };
 
 export type IconKey = keyof typeof Icon;

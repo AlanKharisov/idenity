@@ -48,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
     tracing::info!(
         project = %config.firebase_project_id,
         port    = config.port,
+        admin_uids = ?config.admin_uids,
         "Config loaded"
     );
 

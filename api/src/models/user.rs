@@ -24,6 +24,31 @@ pub struct UserData {
     /// uid of the company-owner this user reports to (when role is courier/manager/controller).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub company_id: Option<String>,
+
+    // ── Company application + admin moderation ───────────────────────────────
+    #[serde(default)]
+    pub banned: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub company_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub registration_number: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contact_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub business_description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_requested_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reviewed_by: Option<String>,
+    /// "pending" | "approved" | "rejected" | "banned" — convenience for admin filtering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub approval_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rejection_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ban_reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,4 +88,22 @@ pub struct SetApprovalRequest {
 pub struct UpdateRolesRequest {
     pub roles: Vec<String>,
     pub company_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestApprovalRequest {
+    pub company_name: String,
+    pub registration_number: String,
+    pub contact_email: String,
+    #[serde(default)]
+    pub description: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModerationRequest {
+    /// Optional reason for reject/ban actions.
+    #[serde(default)]
+    pub reason: Option<String>,
 }
