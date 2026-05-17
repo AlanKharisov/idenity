@@ -1,6 +1,7 @@
 import {
     GoogleAuthProvider,
     signInWithPopup,
+    signInWithRedirect,
     FacebookAuthProvider,
     OAuthProvider,
     UserCredential
@@ -8,12 +9,21 @@ import {
 import { auth } from './config';
 import { apiMe, apiRegister } from '../services/apiClient';
 
+const isMobile = (): boolean => {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 // Google sign-in
 export const signInWithGoogle = async (): Promise<{ success: boolean; user?: any; error?: string }> => {
     try {
         const provider = new GoogleAuthProvider();
-        const result   = await signInWithPopup(auth, provider);
-        return await handleSocialAuthResult(result);
+        if (isMobile()) {
+            await signInWithRedirect(auth, provider);
+            return { success: true }; // Redirecting...
+        } else {
+            const result   = await signInWithPopup(auth, provider);
+            return await handleSocialAuthResult(result);
+        }
     } catch (error: any) {
         console.error('Google sign in error:', error);
         return { success: false, error: error.message };
@@ -24,8 +34,13 @@ export const signInWithGoogle = async (): Promise<{ success: boolean; user?: any
 export const signInWithFacebook = async (): Promise<{ success: boolean; user?: any; error?: string }> => {
     try {
         const provider = new FacebookAuthProvider();
-        const result   = await signInWithPopup(auth, provider);
-        return await handleSocialAuthResult(result);
+        if (isMobile()) {
+            await signInWithRedirect(auth, provider);
+            return { success: true }; // Redirecting...
+        } else {
+            const result   = await signInWithPopup(auth, provider);
+            return await handleSocialAuthResult(result);
+        }
     } catch (error: any) {
         console.error('Facebook sign in error:', error);
         return { success: false, error: error.message };
@@ -36,8 +51,13 @@ export const signInWithFacebook = async (): Promise<{ success: boolean; user?: a
 export const signInWithApple = async (): Promise<{ success: boolean; user?: any; error?: string }> => {
     try {
         const provider = new OAuthProvider('apple.com');
-        const result   = await signInWithPopup(auth, provider);
-        return await handleSocialAuthResult(result);
+        if (isMobile()) {
+            await signInWithRedirect(auth, provider);
+            return { success: true }; // Redirecting...
+        } else {
+            const result   = await signInWithPopup(auth, provider);
+            return await handleSocialAuthResult(result);
+        }
     } catch (error: any) {
         console.error('Apple sign in error:', error);
         return { success: false, error: error.message };
