@@ -74,9 +74,17 @@ const QrScannerPage: React.FC<QrScannerPageProps> = ({ onClose }) => {
     }, []);
 
     const parseQr = useCallback((raw: string): ScanSource => {
-        // JSON with nftId
+        // JSON with nftId or collection
         try {
             const p = JSON.parse(raw);
+            // Collection QR — use first item's nftId to show collection data
+            if (p.type === 'collection' && p.itemIds?.length > 0) {
+                return { kind: 'nft', nftId: p.itemIds[0] };
+            }
+            // Single NFT QR (from collection item or standalone)
+            if (p.type === 'nft' && (p.id || p.collectionId)) {
+                return { kind: 'nft', nftId: p.id || p.collectionId };
+            }
             if (p.nftId || p.id) return { kind: 'nft', nftId: p.nftId || p.id };
         } catch { /* not JSON */ }
         // NFC UID pattern

@@ -9,6 +9,8 @@ export interface PostWithLiked {
     userName: string;
     userAvatar?: string;
     nftImage?: string;
+    nftImages?: string[];
+    walletNftIds?: string[];
     title: string;
     description: string;
     tags?: string[];
@@ -22,6 +24,7 @@ export interface PostWithLiked {
     comments?: any[];
     createdAt: string;
     liked: boolean;
+    category?: string;
 }
 
 export const usePosts = () => {
@@ -36,22 +39,25 @@ export const usePosts = () => {
         try {
             const data = await apiGetPosts();
             const mapped = (data || []).map((p: any) => ({
-                id:          p.id,
-                userId:      p.userId,
-                userName:    p.userName,
-                userAvatar:  p.userAvatar,
-                nftImage:    p.nftImage,
-                title:       p.title,
-                description: p.description,
-                tags:        p.tags || [],
-                blockchain:  p.blockchain,
-                price:       p.price,
-                currency:    p.currency,
-                forSale:     p.forSale,
-                walletNftId: p.walletNftId,
-                likes:       p.likes || 0,
-                likedBy:     p.likedBy || [],
-                comments:    (p.comments || []).map((c: any) => ({
+                id:           p.id,
+                userId:       p.userId,
+                userName:     p.userName,
+                userAvatar:   p.userAvatar,
+                nftImage:     p.nftImage,
+                nftImages:    p.nftImages || [],
+                walletNftIds: p.walletNftIds || [],
+                title:        p.title,
+                description:  p.description,
+                tags:         p.tags || [],
+                blockchain:   p.blockchain,
+                price:        p.price,
+                currency:     p.currency,
+                forSale:      p.forSale,
+                walletNftId:  p.walletNftId,
+                category:     p.category,
+                likes:        p.likes || 0,
+                likedBy:      p.likedBy || [],
+                comments:     (p.comments || []).map((c: any) => ({
                     id:         c.id,
                     userId:     c.userId,
                     userName:   c.userName,
@@ -59,7 +65,7 @@ export const usePosts = () => {
                     text:       c.text,
                     createdAt:  c.createdAt,
                 })),
-                createdAt:   p.createdAt,
+                createdAt:    p.createdAt,
                 liked: currentUser ? (p.likedBy || []).includes(currentUser.uid) : false,
             }));
             setPosts(mapped);

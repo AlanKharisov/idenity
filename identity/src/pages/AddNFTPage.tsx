@@ -297,53 +297,53 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 const collectionImageUrls: string[] = [];
                 const collectionNftIds:    string[] = [];
 
-                // ── Steps 2..N+1 — Mint each item on-chain, record immediately ────
-                // Fresh blockhash fetched per iteration to prevent TTL expiry when
-                // the collection is large and each Phantom approval takes time.
+                const chargeCommission = !mintInfo.isFree && !feeCharged && mintInfo.commissionLamports > 0;
+                if (chargeCommission) {
+                    setUploadProgress('Sending platform fee — approve in Phantom…');
+                    await sendCommission(umi, mintInfo.commissionLamports);
+                    feeCharged = true;
+                }
+
+                setUploadProgress(`Building ${successful.length} transactions…`);
+                const sharedBlockhash = await umi.rpc.getLatestBlockhash();
+                const collectionMintSigners: any[] = [];
+                const partiallySignedTxs: any[] = [];
+
                 for (let i = 0; i < successful.length; i++) {
-                    const item      = successful[i];
-                    const stepNum   = i + 2;
-                    const stepTotal = successful.length + 3;
-                    const itemTitle = items[item.index]?.title
-                        ?? `${collectionName.trim() || 'Collection'} #${item.index + 1}`;
+                    const item = successful[i];
+                    const itemTitle = items[item.index]?.title ?? `${collectionName.trim() || 'Collection'} #${item.index + 1}`;
 
-                    const chargeCommission = !mintInfo.isFree && !feeCharged && mintInfo.commissionLamports > 0;
-                    setUploadProgress(
-                        chargeCommission
-                            ? `Step ${stepNum}/${stepTotal} — Sending platform fee — approve in Phantom…`
-                            : `Step ${stepNum}/${stepTotal} — Minting item ${i + 1}/${successful.length} — approve in Phantom…`
-                    );
+                    const mintSigner = generateSigner(umi);
+                    collectionMintSigners.push({ id: item.id, imageUrl: item.imageUrl, signer: mintSigner });
 
-                    // ── Commission is sent FIRST as a standalone TX (never bundled). ──
-                    if (chargeCommission) {
-                        await sendCommission(umi, mintInfo.commissionLamports);
-                        feeCharged = true;
-                    }
-
-                    setUploadProgress(`Step ${stepNum}/${stepTotal} — Minting item ${i + 1}/${successful.length} — approve in Phantom…`);
-                    console.log(`[AddNFT] minting collection item ${i + 1}/${successful.length} (id: ${item.id})…`);
-
-                    const mint            = generateSigner(umi);
-                    const latestBlockhash = await umi.rpc.getLatestBlockhash();
-                    console.log(`[AddNFT] collection item ${i + 1} blockhash:`, latestBlockhash.blockhash);
-
-                    await createNft(umi, {
-                        mint,
-                        name:                 itemTitle,
-                        uri:                  item.metadataUri,
+                    const builtTx = createNft(umi, {
+                        mint: mintSigner,
+                        name: itemTitle,
+                        uri: item.metadataUri,
                         sellerFeeBasisPoints: percentAmount(parseFloat(royalty)),
-                    })
-                        .setBlockhash(latestBlockhash)
-                        .sendAndConfirm(umi, { confirm: { strategy: { type: 'blockhash', ...latestBlockhash } } });
+                    }).setBlockhash(sharedBlockhash).build(umi);
 
-                    console.log(`[AddNFT] collection item ${i + 1} minted:`, mint.publicKey);
+                    const partSigned = await mintSigner.signTransaction(builtTx);
+                    partiallySignedTxs.push(partSigned);
+                }
 
-                    // Persist on-chain address immediately after each confirm.
-                    setUploadProgress(`Step ${stepNum}/${stepTotal} — Recording item ${i + 1}/${successful.length}…`);
-                    await apiUpdateNFT(item.id, { mintAddress: mint.publicKey });
+                setUploadProgress(`Approve all ${successful.length} items in Phantom (one click)…`);
+                console.log(`[AddNFT] requesting signAllTransactions for ${successful.length} collection items…`);
+                const fullySignedTxs = await umi.identity.signAllTransactions(partiallySignedTxs);
 
-                    collectionImageUrls.push(item.imageUrl as string);
-                    collectionNftIds.push(item.id    as string);
+                for (let i = 0; i < fullySignedTxs.length; i++) {
+                    setUploadProgress(`Step ${i + 2}/${successful.length + 2} — Sending item ${i + 1}/${successful.length}…`);
+                    const sig = await umi.rpc.sendTransaction(fullySignedTxs[i], { skipPreflight: true });
+                    await umi.rpc.confirmTransaction(sig, {
+                        strategy: { type: 'blockhash', ...sharedBlockhash },
+                    });
+
+                    const info = collectionMintSigners[i];
+                    console.log(`[AddNFT] collection item ${i + 1} confirmed:`, info.signer.publicKey);
+                    await apiUpdateNFT(info.id, { mintAddress: info.signer.publicKey });
+
+                    collectionImageUrls.push(info.imageUrl as string);
+                    collectionNftIds.push(info.id as string);
                 }
 
                 // ── Single collection post after all mints complete ───────────────
@@ -441,7 +441,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     // Step 4/4 ── Broadcast all, record addresses, publish to feed.
                     for (let i = 0; i < fullySignedTxs.length; i++) {
                         setUploadProgress(`Step 4/4 — Sending edition ${i + 1}/${numEditions}…`);
-                        const sig = await umi.rpc.sendTransaction(fullySignedTxs[i]);
+                        const sig = await umi.rpc.sendTransaction(fullySignedTxs[i], { skipPreflight: true });
                         await umi.rpc.confirmTransaction(sig, {
                             strategy: { type: 'blockhash', ...sharedBlockhash },
                         });
@@ -1118,7 +1118,18 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                             <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
                                    onChange={e => {
                                        const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/') && f.size <= 10 * 1024 * 1024);
-                                       if (files.length > 0) setCollectionFiles(files);
+                                       if (files.length >= 2) {
+                                           // 2+ photos = auto-collection
+                                           setIsCollection(true);
+                                           setCollectionFiles(files);
+                                           setSelectedFile(null);
+                                           setPreviewUrl('');
+                                       } else if (files.length === 1) {
+                                           setIsCollection(false);
+                                           setCollectionFiles([]);
+                                           setSelectedFile(files[0]);
+                                           setPreviewUrl(URL.createObjectURL(files[0]));
+                                       }
                                    }} />
                         </div>
                     ) : (
@@ -1190,14 +1201,24 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                                 ) : (
                                     <div style={s.dropContent}>
                                         <div style={{ fontSize: '40px', marginBottom: '10px' }}>📁</div>
-                                        <p style={{ fontWeight: 'bold', color: 'var(--text)', marginBottom: '4px' }}>Drag & drop your file here</p>
-                                        <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '4px' }}>or click to browse</p>
+                                        <p style={{ fontWeight: 'bold', color: 'var(--text)', marginBottom: '4px' }}>Drag & drop or click to browse</p>
+                                        <p style={{ color: 'var(--text-muted)', fontSize: '13px', marginBottom: '4px' }}>Select 2+ images → auto-collection</p>
                                         <p style={{ color: 'var(--text-faint)', fontSize: '11px' }}>JPG, PNG, GIF, WebP · Max 10MB</p>
                                     </div>
                                 )}
                             </div>
-                            <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }}
-                                   onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); }} />
+                            <input ref={fileInputRef} type="file" accept="image/*" multiple style={{ display: 'none' }}
+                                   onChange={e => {
+                                       const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('image/') && f.size <= 10 * 1024 * 1024);
+                                       if (files.length >= 2) {
+                                           setIsCollection(true);
+                                           setCollectionFiles(files);
+                                           setSelectedFile(null);
+                                           setPreviewUrl('');
+                                       } else if (files.length === 1) {
+                                           processFile(files[0]);
+                                       }
+                                   }} />
                         </div>
                     )}
 
@@ -1379,10 +1400,8 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                                         const pk = await connectPhantom();
                                         console.log('[Phantom] connected, publicKey =', pk);
                                     } catch (e: any) {
-                                        // Phantom rejection has code 4001 — silent only for that case.
-                                        if (e?.code === 4001) return;
                                         console.error('[Phantom] connect failed', e);
-                                        alert(`Phantom connect failed: ${e?.message ?? e}`);
+                                        alert(`Phantom connect failed: ${e?.message ?? e} (Code: ${e?.code})`);
                                     }
                                 }}>
                             👻 Connect Phantom Wallet

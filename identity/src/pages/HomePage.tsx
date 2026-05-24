@@ -104,7 +104,7 @@ const HomePage: React.FC = () => {
     let matchesFilter = true;
     if (activeFilter === 'Trending') matchesFilter = true;
     else if (activeFilter === 'For Sale') matchesFilter = !!post.forSale;
-    else matchesFilter = (post as any).category === activeFilter;
+    else matchesFilter = post.category === activeFilter;
     return matchesSearch && matchesFilter;
   });
 
@@ -268,8 +268,8 @@ const HomePage: React.FC = () => {
               </div>
 
               <div style={{ marginTop: 12, position: 'relative', overflow: 'hidden', borderRadius: 12 }}>
-                {(post as any).nftImages?.length > 0 ? (
-                  <CollectionGallery images={(post as any).nftImages} title={post.title} />
+                {post.nftImages && post.nftImages.length > 0 ? (
+                  <CollectionGallery images={post.nftImages} title={post.title} />
                 ) : (
                   <img
                     src={post.nftImage || '/img/default-nft.png'}

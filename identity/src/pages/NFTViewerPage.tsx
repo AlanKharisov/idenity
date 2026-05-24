@@ -17,6 +17,9 @@ interface NFT {
   category?: string;
   forSale?: boolean;
   createdAt?: string;
+  // Collection fields
+  nftImages?: string[];
+  walletNftIds?: string[];
 }
 
 interface NFTViewerPageProps {
@@ -29,8 +32,19 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
   const [showQR, setShowQR] = useState(false);
   const [qrCodeUrl, setQrCodeUrl] = useState('');
 
+  // Collection state
+  const isCollection = !!(nft.nftImages && nft.nftImages.length > 1);
+  const [activeImageIdx, setActiveImageIdx] = useState(0);
+  const [itemQrUrls, setItemQrUrls] = useState<string[]>([]);
+  const [collectionQrUrl, setCollectionQrUrl] = useState('');
+  const [qrMode, setQrMode] = useState<'collection' | 'item'>('collection');
+
   useEffect(() => {
-    generateQRCode();
+    if (isCollection) {
+      generateCollectionQRCodes();
+    } else {
+      generateQRCode();
+    }
   }, [nft]); // eslint-disable-line
 
   const generateQRCode = async () => {
@@ -52,9 +66,62 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
     }
   };
 
+  const generateCollectionQRCodes = async () => {
+    try {
+      // Collection-level QR
+      const collectionData = JSON.stringify({
+        type: 'collection',
+        id: nft.id,
+        title: nft.title,
+        owner: nft.ownerName,
+        itemCount: nft.nftImages?.length || 0,
+        itemIds: nft.walletNftIds || [],
+        created: nft.createdAt || new Date().toISOString(),
+      });
+      const collQr = await QRCode.toDataURL(collectionData, {
+        width: 300, margin: 2,
+        color: { dark: '#0a0a0a', light: '#ffffff' },
+      });
+      setCollectionQrUrl(collQr);
+
+      // Per-item QR codes
+      const ids = nft.walletNftIds || [];
+      const urls: string[] = [];
+      for (let i = 0; i < (nft.nftImages?.length || 0); i++) {
+        const itemData = JSON.stringify({
+          type: 'nft',
+          id: ids[i] || `${nft.id}_item_${i}`,
+          collectionId: nft.id,
+          collectionTitle: nft.title,
+          itemIndex: i + 1,
+          owner: nft.ownerName,
+          created: nft.createdAt || new Date().toISOString(),
+        });
+        const url = await QRCode.toDataURL(itemData, {
+          width: 300, margin: 2,
+          color: { dark: '#0a0a0a', light: '#ffffff' },
+        });
+        urls.push(url);
+      }
+      setItemQrUrls(urls);
+    } catch (error) {
+      console.error('Error generating collection QR codes:', error);
+    }
+  };
+
   const handleZoomIn = () => setScale(p => Math.min(p + 0.25, 3));
   const handleZoomOut = () => setScale(p => Math.max(p - 0.25, 0.5));
   const handleResetZoom = () => setScale(1);
+
+  const currentQrUrl = isCollection
+    ? (qrMode === 'collection' ? collectionQrUrl : itemQrUrls[activeImageIdx] || '')
+    : qrCodeUrl;
+
+  const currentQrLabel = isCollection
+    ? (qrMode === 'collection'
+      ? `Collection · ${nft.nftImages?.length} NFTs`
+      : `NFT #${activeImageIdx + 1} of ${nft.nftImages?.length}`)
+    : 'SCAN TO VERIFY';
 
   return (
     <div
@@ -107,6 +174,11 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
             }}
           >
             {nft.title}
+            {isCollection && (
+              <span style={{ fontSize: 12, color: 'var(--primary)', marginLeft: 6, fontWeight: 600 }}>
+                📚 Collection
+              </span>
+            )}
           </div>
           <div className="mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>
             #{(nft.id || '').slice(0, 8)}
@@ -143,79 +215,220 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
         }}
       >
         {!showQR ? (
-          <div
-            style={{
-              maxWidth: '100%',
-              maxHeight: '100%',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 24,
-              overflow: 'hidden',
-              boxShadow: '0 20px 60px -20px rgba(16,185,129,0.25), 0 4px 12px rgba(0,0,0,0.08)',
-              background: 'var(--bg-card)',
-              border: '1px solid var(--border)',
-              padding: 12,
-            }}
-          >
-            <img
-              src={nft.image}
-              alt={nft.title}
-              style={{
-                transform: `scale(${scale})`,
-                transition: 'transform 0.3s ease',
-                maxWidth: '100%',
-                maxHeight: '60vh',
-                objectFit: 'contain',
-                transformOrigin: 'center',
-                borderRadius: 16,
-                display: 'block',
-              }}
-            />
-          </div>
-        ) : (
-          <div
-            style={{
-              background: 'white',
-              padding: 20,
-              borderRadius: 24,
-              border: '1px solid var(--border)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: 10,
-              boxShadow: 'var(--shadow-lg)',
-            }}
-          >
-            {qrCodeUrl ? (
-              <img src={qrCodeUrl} alt="QR Code" style={{ width: 240, height: 240, display: 'block' }} />
-            ) : (
-              <div className="spinner" />
-            )}
+          /* ── Image view ── */
+          isCollection ? (
+            /* Collection gallery */
+            <div style={{ width: '100%', maxWidth: 400 }}>
+              <div
+                style={{
+                  borderRadius: 24,
+                  overflow: 'hidden',
+                  boxShadow: '0 20px 60px -20px rgba(16,185,129,0.25), 0 4px 12px rgba(0,0,0,0.08)',
+                  background: 'var(--bg-card)',
+                  border: '1px solid var(--border)',
+                  padding: 12,
+                }}
+              >
+                <img
+                  src={nft.nftImages![activeImageIdx] || '/img/default-nft.png'}
+                  alt={`${nft.title} #${activeImageIdx + 1}`}
+                  style={{
+                    transform: `scale(${scale})`,
+                    transition: 'transform 0.3s ease',
+                    width: '100%',
+                    maxHeight: '50vh',
+                    objectFit: 'contain',
+                    transformOrigin: 'center',
+                    borderRadius: 16,
+                    display: 'block',
+                  }}
+                  onError={e => { (e.currentTarget as HTMLImageElement).src = '/img/default-nft.png'; }}
+                />
+              </div>
+              {/* Thumbnail strip */}
+              <div style={{
+                display: 'flex', gap: 8, marginTop: 12,
+                overflowX: 'auto', padding: '4px 0',
+                justifyContent: nft.nftImages!.length <= 5 ? 'center' : 'flex-start',
+              }}>
+                {nft.nftImages!.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img || '/img/default-nft.png'}
+                    alt={`#${i + 1}`}
+                    onClick={() => { setActiveImageIdx(i); setScale(1); }}
+                    style={{
+                      width: 52, height: 52,
+                      borderRadius: 10,
+                      objectFit: 'cover',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      border: activeImageIdx === i
+                        ? '2px solid var(--primary)'
+                        : '2px solid transparent',
+                      opacity: activeImageIdx === i ? 1 : 0.6,
+                      transition: 'all 0.2s',
+                    }}
+                    onError={e => { (e.currentTarget as HTMLImageElement).src = '/img/default-nft.png'; }}
+                  />
+                ))}
+              </div>
+              <div className="mono" style={{
+                textAlign: 'center', fontSize: 12,
+                color: 'var(--text-muted)', marginTop: 6,
+              }}>
+                {activeImageIdx + 1} / {nft.nftImages!.length}
+              </div>
+            </div>
+          ) : (
+            /* Single NFT image */
             <div
-              className="mono"
               style={{
-                fontSize: 11,
-                color: '#666',
-                letterSpacing: '0.08em',
+                maxWidth: '100%',
+                maxHeight: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 24,
+                overflow: 'hidden',
+                boxShadow: '0 20px 60px -20px rgba(16,185,129,0.25), 0 4px 12px rgba(0,0,0,0.08)',
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border)',
+                padding: 12,
               }}
             >
-              SCAN TO VERIFY
-            </div>
-            {qrCodeUrl && (
-              <button
-                onClick={() => {
-                  const link = document.createElement('a');
-                  link.download = `nft-${nft.id}-qr.png`;
-                  link.href = qrCodeUrl;
-                  link.click();
+              <img
+                src={nft.image}
+                alt={nft.title}
+                style={{
+                  transform: `scale(${scale})`,
+                  transition: 'transform 0.3s ease',
+                  maxWidth: '100%',
+                  maxHeight: '60vh',
+                  objectFit: 'contain',
+                  transformOrigin: 'center',
+                  borderRadius: 16,
+                  display: 'block',
                 }}
-                className="btn btn-primary"
-                style={{ marginTop: 6, fontSize: 13, padding: '8px 16px' }}
-              >
-                Download QR
-              </button>
+              />
+            </div>
+          )
+        ) : (
+          /* ── QR view ── */
+          <div style={{ width: '100%', maxWidth: 360, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14 }}>
+            {/* QR mode toggle for collections */}
+            {isCollection && (
+              <div style={{
+                display: 'flex', gap: 4,
+                background: 'var(--bg-soft)', borderRadius: 10, padding: 4,
+                width: '100%',
+              }}>
+                <button
+                  onClick={() => setQrMode('collection')}
+                  style={{
+                    flex: 1, padding: '8px 12px', borderRadius: 8,
+                    fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+                    border: 'none', cursor: 'pointer',
+                    background: qrMode === 'collection' ? 'var(--primary)' : 'transparent',
+                    color: qrMode === 'collection' ? 'white' : 'var(--text-muted)',
+                  }}
+                >
+                  📚 Collection QR
+                </button>
+                <button
+                  onClick={() => setQrMode('item')}
+                  style={{
+                    flex: 1, padding: '8px 12px', borderRadius: 8,
+                    fontSize: 13, fontWeight: 600, fontFamily: 'inherit',
+                    border: 'none', cursor: 'pointer',
+                    background: qrMode === 'item' ? 'var(--primary)' : 'transparent',
+                    color: qrMode === 'item' ? 'white' : 'var(--text-muted)',
+                  }}
+                >
+                  🖼 NFT #{activeImageIdx + 1} QR
+                </button>
+              </div>
             )}
+
+            {/* Item selector (only in item mode for collections) */}
+            {isCollection && qrMode === 'item' && (
+              <div style={{
+                display: 'flex', gap: 6, overflowX: 'auto', width: '100%',
+                padding: '4px 0',
+                justifyContent: nft.nftImages!.length <= 5 ? 'center' : 'flex-start',
+              }}>
+                {nft.nftImages!.map((img, i) => (
+                  <img
+                    key={i}
+                    src={img || '/img/default-nft.png'}
+                    alt={`#${i + 1}`}
+                    onClick={() => setActiveImageIdx(i)}
+                    style={{
+                      width: 44, height: 44,
+                      borderRadius: 8,
+                      objectFit: 'cover',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      border: activeImageIdx === i
+                        ? '2px solid var(--primary)'
+                        : '2px solid transparent',
+                      opacity: activeImageIdx === i ? 1 : 0.5,
+                    }}
+                    onError={e => { (e.currentTarget as HTMLImageElement).src = '/img/default-nft.png'; }}
+                  />
+                ))}
+              </div>
+            )}
+
+            {/* QR code card */}
+            <div
+              style={{
+                background: 'white',
+                padding: 20,
+                borderRadius: 24,
+                border: '1px solid var(--border)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 10,
+                boxShadow: 'var(--shadow-lg)',
+                width: '100%',
+              }}
+            >
+              {currentQrUrl ? (
+                <img src={currentQrUrl} alt="QR Code" style={{ width: 240, height: 240, display: 'block' }} />
+              ) : (
+                <div className="spinner" />
+              )}
+              <div
+                className="mono"
+                style={{
+                  fontSize: 11,
+                  color: '#666',
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                {currentQrLabel}
+              </div>
+              {currentQrUrl && (
+                <button
+                  onClick={() => {
+                    const link = document.createElement('a');
+                    const suffix = isCollection
+                      ? (qrMode === 'collection' ? 'collection' : `item-${activeImageIdx + 1}`)
+                      : nft.id;
+                    link.download = `nft-${suffix}-qr.png`;
+                    link.href = currentQrUrl;
+                    link.click();
+                  }}
+                  className="btn btn-primary"
+                  style={{ marginTop: 6, fontSize: 13, padding: '8px 16px' }}
+                >
+                  Download QR
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -330,6 +543,25 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
             </div>
             <div style={{ fontSize: 13, fontWeight: 600 }}>{nft.ownerName}</div>
           </div>
+          {isCollection && (
+            <div style={{ textAlign: 'center' }}>
+              <div
+                className="mono"
+                style={{
+                  fontSize: 10,
+                  color: 'var(--text-faint)',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.08em',
+                  fontWeight: 700,
+                }}
+              >
+                Items
+              </div>
+              <div className="mono" style={{ fontSize: 13, fontWeight: 600, color: 'var(--primary)' }}>
+                {nft.nftImages?.length} NFTs
+              </div>
+            </div>
+          )}
           <div style={{ textAlign: 'center' }}>
             <div
               className="mono"
