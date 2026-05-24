@@ -90,13 +90,15 @@ const QrScannerPage: React.FC<QrScannerPageProps> = ({ onClose }) => {
         // NFC UID pattern
         if (/^[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){3,}$/.test(raw.trim()))
             return { kind: 'nfc', uid: raw.trim() };
-        // URL with params
+        // URL with params or path
         try {
             const url = new URL(raw);
             const nfc = url.searchParams.get('nfc');
             const nftParam = url.searchParams.get('nft');
+            const pathMatch = url.pathname.match(/\/nft\/([^\/]+)/);
             if (nfc) return { kind: 'nfc', uid: nfc };
             if (nftParam) return { kind: 'nft', nftId: nftParam };
+            if (pathMatch) return { kind: 'nft', nftId: pathMatch[1] };
         } catch { /* not URL */ }
         return null;
     }, []);

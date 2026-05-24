@@ -49,12 +49,9 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
 
   const generateQRCode = async () => {
     try {
-      const qrData = JSON.stringify({
-        id: nft.id,
-        title: nft.title,
-        owner: nft.ownerName,
-        created: nft.createdAt || new Date().toISOString(),
-      });
+      // Create a standard URL so regular phone cameras can scan and open it natively
+      const baseUrl = window.location.origin + (window.location.pathname.includes('/idenity') ? '/idenity' : '');
+      const qrData = `${baseUrl}/nft/${nft.id}`;
       const url = await QRCode.toDataURL(qrData, {
         width: 300,
         margin: 2,
@@ -68,16 +65,10 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
 
   const generateCollectionQRCodes = async () => {
     try {
-      // Collection-level QR
-      const collectionData = JSON.stringify({
-        type: 'collection',
-        id: nft.id,
-        title: nft.title,
-        owner: nft.ownerName,
-        itemCount: nft.nftImages?.length || 0,
-        itemIds: nft.walletNftIds || [],
-        created: nft.createdAt || new Date().toISOString(),
-      });
+      const baseUrl = window.location.origin + (window.location.pathname.includes('/idenity') ? '/idenity' : '');
+      // Collection-level QR (links to first item)
+      const firstItemId = (nft.walletNftIds && nft.walletNftIds.length > 0) ? nft.walletNftIds[0] : nft.id;
+      const collectionData = `${baseUrl}/nft/${firstItemId}`;
       const collQr = await QRCode.toDataURL(collectionData, {
         width: 300, margin: 2,
         color: { dark: '#0a0a0a', light: '#ffffff' },
@@ -88,15 +79,8 @@ const NFTViewerPage: React.FC<NFTViewerPageProps> = ({ nft, onClose }) => {
       const ids = nft.walletNftIds || [];
       const urls: string[] = [];
       for (let i = 0; i < (nft.nftImages?.length || 0); i++) {
-        const itemData = JSON.stringify({
-          type: 'nft',
-          id: ids[i] || `${nft.id}_item_${i}`,
-          collectionId: nft.id,
-          collectionTitle: nft.title,
-          itemIndex: i + 1,
-          owner: nft.ownerName,
-          created: nft.createdAt || new Date().toISOString(),
-        });
+        const itemId = ids[i] || `${nft.id}_item_${i}`;
+        const itemData = `${baseUrl}/nft/${itemId}`;
         const url = await QRCode.toDataURL(itemData, {
           width: 300, margin: 2,
           color: { dark: '#0a0a0a', light: '#ffffff' },
