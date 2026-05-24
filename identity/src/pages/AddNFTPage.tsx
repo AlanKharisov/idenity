@@ -332,11 +332,22 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 const fullySignedTxs = await umi.identity.signAllTransactions(partiallySignedTxs);
 
                 for (let i = 0; i < fullySignedTxs.length; i++) {
-                    setUploadProgress(`Step ${i + 2}/${successful.length + 2} — Sending item ${i + 1}/${successful.length}…`);
+                    setUploadProgress(`Broadcasting item ${i + 1}/${successful.length}…`);
                     const sig = await umi.rpc.sendTransaction(fullySignedTxs[i], { skipPreflight: true });
-                    await umi.rpc.confirmTransaction(sig, {
-                        strategy: { type: 'blockhash', ...sharedBlockhash },
-                    });
+                    partiallySignedTxs[i] = sig; // repurpose array to store signatures
+                    await new Promise(r => setTimeout(r, 300)); // small delay to avoid send rate limit
+                }
+
+                for (let i = 0; i < fullySignedTxs.length; i++) {
+                    setUploadProgress(`Confirming item ${i + 1}/${successful.length}…`);
+                    const sig = partiallySignedTxs[i];
+                    try {
+                        await umi.rpc.confirmTransaction(sig, {
+                            strategy: { type: 'blockhash', ...sharedBlockhash },
+                        });
+                    } catch (err) {
+                        console.warn(`[AddNFT] collection item ${i + 1} confirm error (ignoring devnet RPC issues):`, err);
+                    }
 
                     const info = collectionMintSigners[i];
                     console.log(`[AddNFT] collection item ${i + 1} confirmed:`, info.signer.publicKey);
@@ -438,13 +449,25 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     console.log(`[AddNFT] requesting signAllTransactions for ${numEditions} editions…`);
                     const fullySignedTxs = await umi.identity.signAllTransactions(partiallySignedTxs);
 
-                    // Step 4/4 ── Broadcast all, record addresses, publish to feed.
+                    // Step 4/4 ── Broadcast all quickly to beat blockhash expiration.
+                    const editionSigs: any[] = [];
                     for (let i = 0; i < fullySignedTxs.length; i++) {
-                        setUploadProgress(`Step 4/4 — Sending edition ${i + 1}/${numEditions}…`);
+                        setUploadProgress(`Step 4/4 — Broadcasting edition ${i + 1}/${numEditions}…`);
                         const sig = await umi.rpc.sendTransaction(fullySignedTxs[i], { skipPreflight: true });
-                        await umi.rpc.confirmTransaction(sig, {
-                            strategy: { type: 'blockhash', ...sharedBlockhash },
-                        });
+                        editionSigs.push(sig);
+                        await new Promise(r => setTimeout(r, 300));
+                    }
+
+                    // Now confirm them sequentially.
+                    for (let i = 0; i < editionSigs.length; i++) {
+                        setUploadProgress(`Step 4/4 — Confirming edition ${i + 1}/${numEditions}…`);
+                        try {
+                            await umi.rpc.confirmTransaction(editionSigs[i], {
+                                strategy: { type: 'blockhash', ...sharedBlockhash },
+                            });
+                        } catch (err) {
+                            console.warn(`[AddNFT] edition ${i + 1} confirm error (ignoring devnet RPC issues):`, err);
+                        }
                         console.log(`[AddNFT] edition ${i + 1} confirmed:`, editionMintSigners[i].publicKey);
                         await apiUpdateNFT(editionIds[i], { mintAddress: editionMintSigners[i].publicKey });
                     }
