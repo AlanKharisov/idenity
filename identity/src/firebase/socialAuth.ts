@@ -2,8 +2,11 @@ import {
     GoogleAuthProvider,
     signInWithPopup,
     signInWithRedirect,
+    setPersistence,
+    browserLocalPersistence,
     FacebookAuthProvider,
     OAuthProvider,
+    AuthProvider,
     UserCredential
 } from 'firebase/auth';
 import { auth } from './config';
@@ -13,12 +16,17 @@ const isMobile = (): boolean => {
     return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
 };
 
+const signInWithMobileRedirect = async (provider: AuthProvider) => {
+    await setPersistence(auth, browserLocalPersistence);
+    await signInWithRedirect(auth, provider);
+};
+
 // Google sign-in
 export const signInWithGoogle = async (): Promise<{ success: boolean; user?: any; error?: string }> => {
     try {
         const provider = new GoogleAuthProvider();
         if (isMobile()) {
-            await signInWithRedirect(auth, provider);
+            await signInWithMobileRedirect(provider);
             return { success: true };
         }
         const result   = await signInWithPopup(auth, provider);
@@ -34,7 +42,7 @@ export const signInWithFacebook = async (): Promise<{ success: boolean; user?: a
     try {
         const provider = new FacebookAuthProvider();
         if (isMobile()) {
-            await signInWithRedirect(auth, provider);
+            await signInWithMobileRedirect(provider);
             return { success: true };
         }
         const result   = await signInWithPopup(auth, provider);
@@ -50,7 +58,7 @@ export const signInWithApple = async (): Promise<{ success: boolean; user?: any;
     try {
         const provider = new OAuthProvider('apple.com');
         if (isMobile()) {
-            await signInWithRedirect(auth, provider);
+            await signInWithMobileRedirect(provider);
             return { success: true };
         }
         const result   = await signInWithPopup(auth, provider);

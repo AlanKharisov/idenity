@@ -119,6 +119,28 @@ const syncFirebaseUser = async (firebaseUser: User) => {
     return userData ? mapUser(userData) : null;
 };
 
+const describeFirebaseUser = (user: User | null | undefined) => {
+    if (!user) return null;
+    return {
+        uid: user.uid,
+        email: user.email,
+        displayName: user.displayName,
+        emailVerified: user.emailVerified,
+        providerIds: user.providerData.map(provider => provider.providerId),
+    };
+};
+
+const logAuthError = (label: string, error: any) => {
+    console.error(label, {
+        code: error?.code,
+        message: error?.message,
+        name: error?.name,
+        stack: error?.stack,
+        customData: error?.customData,
+        raw: error,
+    });
+};
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [currentUser, setCurrentUser] = useState<UserData | null>(null);
@@ -147,30 +169,53 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     useEffect(() => {
-        getRedirectResult(auth)
-            .then(async result => {
-                if (!result?.user) return;
-                setCurrentUser(await syncFirebaseUser(result.user));
-            })
-            .catch(e => {
-                console.error('Redirect auth result error:', e);
-            });
+        let active = true;
+        let unsubscribe: (() => void) | undefined;
 
-        const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+        const initAuth = async () => {
             try {
-                if (firebaseUser) {
-                    setCurrentUser(await syncFirebaseUser(firebaseUser));
-                } else {
-                    setCurrentUser(null);
+                const result = await getRedirectResult(auth);
+                console.log('[AUTH] redirect result', result ? {
+                    operationType: result.operationType,
+                    providerId: result.providerId,
+                    user: describeFirebaseUser(result.user),
+                } : null);
+                console.log('[AUTH] current user', describeFirebaseUser(auth.currentUser));
+
+                if (!active) return;
+                if (result?.user) {
+                    setCurrentUser(await syncFirebaseUser(result.user));
                 }
-            } catch (e) {
-                console.error('Auth state error:', e);
-                setCurrentUser(null);
-            } finally {
-                setLoading(false);
+            } catch (e: any) {
+                logAuthError('[AUTH] redirect result error', e);
             }
-        });
-        return unsubscribe;
+
+            if (!active) return;
+            unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+                console.log('[AUTH] auth state changed', describeFirebaseUser(firebaseUser));
+                console.log('[AUTH] current user', describeFirebaseUser(auth.currentUser));
+
+                try {
+                    if (firebaseUser) {
+                        setCurrentUser(await syncFirebaseUser(firebaseUser));
+                    } else {
+                        setCurrentUser(null);
+                    }
+                } catch (e) {
+                    console.error('Auth state error:', e);
+                    setCurrentUser(null);
+                } finally {
+                    setLoading(false);
+                }
+            });
+        };
+
+        initAuth();
+
+        return () => {
+            active = false;
+            unsubscribe?.();
+        };
     }, []);
 
     const login = async (email: string, password: string) => {
