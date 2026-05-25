@@ -1,8 +1,13 @@
 import { auth } from '../firebase/config';
 
-const BASE_URL = process.env.REACT_APP_API_URL || 'https://idenity-backend.duckdns.org';
+const LOCAL_API_URL = 'http://localhost:8090';
+const PROD_API_URL = 'https://idenity-backend.duckdns.org';
 
-console.log('[API] Base URL:', BASE_URL);
+const BASE_URL = process.env.NODE_ENV === 'development'
+    ? LOCAL_API_URL
+    : process.env.REACT_APP_API_URL || PROD_API_URL;
+
+console.log('[API] API_BASE_URL:', BASE_URL);
 
 async function getToken(): Promise<string | null> {
     try {

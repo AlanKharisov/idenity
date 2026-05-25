@@ -237,6 +237,10 @@ pub async fn create_nft(
         edition_count: None,
         edition_number: None,
         master_nft_id: None,
+        batch_id: None,
+        batch_name: None,
+        batch_index: None,
+        batch_size: None,
     };
 
     let mut nfts = load_nfts(&state, &auth.uid).await?;
@@ -337,6 +341,15 @@ pub async fn batch_create_nfts(
     let mut results: Vec<BatchItemResult> = Vec::with_capacity(files.len());
     let mut created = 0usize;
     let mut failed = 0usize;
+    let batch_id = Uuid::new_v4().to_string();
+    let batch_size = files.len() as u32;
+    let batch_name = shared
+        .batch_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Collection")
+        .to_owned();
 
     for (index, (bytes, ct)) in files.into_iter().enumerate() {
         let item_meta = shared.items.get(index);
@@ -395,6 +408,10 @@ pub async fn batch_create_nfts(
                     edition_count: None,
                     edition_number: None,
                     master_nft_id: None,
+                    batch_id: Some(batch_id.clone()),
+                    batch_name: Some(batch_name.clone()),
+                    batch_index: Some(index as u32),
+                    batch_size: Some(batch_size),
                 };
                 nfts.push(nft);
                 results.push(BatchItemResult {
@@ -573,6 +590,15 @@ pub async fn create_edition_nfts(
         .map_err(|e| AppError::Firebase(e.to_string()))?;
 
     let now = Utc::now().to_rfc3339();
+    let batch_id = Uuid::new_v4().to_string();
+    let batch_size = edition_count + 1;
+    let batch_name = req
+        .batch_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(req.title.as_str())
+        .to_owned();
 
     // ── Master Edition record (edition_number = 0) ─────────────────────────────
     let master = Nft {
@@ -595,6 +621,10 @@ pub async fn create_edition_nfts(
         edition_count:  Some(edition_count),
         edition_number: Some(0),
         master_nft_id:  None,
+        batch_id:       Some(batch_id),
+        batch_name:     Some(batch_name),
+        batch_index:    Some(0),
+        batch_size:     Some(batch_size),
     };
 
     // ── Print-edition placeholder records (edition_number = 1..N) ─────────────
@@ -610,6 +640,7 @@ pub async fn create_edition_nfts(
             title:          format!("{} #{}", req.title, n),
             edition_number: Some(n),
             master_nft_id:  Some(master_id.clone()),
+            batch_index:    Some(n),
             // Inherit everything else from master
             mint_address:   None,
             edition_count:  None, // only master carries the total

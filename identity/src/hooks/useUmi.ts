@@ -12,9 +12,8 @@ function getPhantom(): any {
 /**
  * Returns a Umi instance connected to Solana Devnet.
  *
- * Auto-reconnects silently on mount if the user has previously authorized
- * the app. Listens to Phantom's connect/disconnect events so isReady
- * stays in sync without requiring a page reload.
+ * Listens to Phantom's connect/disconnect events so isReady stays in sync
+ * without requiring a page reload.
  */
 export function useUmi() {
     const phantomWallet = getPhantom();
@@ -35,15 +34,7 @@ export function useUmi() {
         wallet.on?.('connect', onConnect);
         wallet.on?.('disconnect', onDisconnect);
 
-        // Silently reconnect if the user already authorized this site before.
-        if (!wallet.publicKey) {
-            wallet.connect?.({ onlyIfTrusted: true })
-                .then((resp: any) => {
-                    const pk = resp?.publicKey?.toString() ?? wallet.publicKey?.toString() ?? '';
-                    if (pk) setPublicKeyStr(pk);
-                })
-                .catch(() => {/* not previously authorized — ignore */});
-        } else {
+        if (wallet.publicKey) {
             setPublicKeyStr(wallet.publicKey.toString());
         }
 
@@ -63,10 +54,8 @@ export function useUmi() {
 
     /**
      * Trigger an explicit Phantom connect popup and resolve the publicKey.
-     * Use this from a button click — `useEffect`'s silent reconnect only
-     * succeeds for already-trusted sites, and Phantom doesn't always emit a
-     * `'connect'` event on the first authorization, so we must read the
-     * publicKey from the `connect()` promise itself.
+     * Use this from a button click. Phantom doesn't always emit a `'connect'`
+     * event on the first authorization, so read the publicKey from the promise.
      */
     const connect = async (): Promise<string> => {
         const wallet = getPhantom();

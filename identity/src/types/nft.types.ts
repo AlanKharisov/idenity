@@ -14,6 +14,10 @@ export interface NFT {
     forSale: boolean;
     currency?: string;
     createdAt: string;
+    batchId?: string;
+    batchName?: string;
+    batchIndex?: number;
+    batchSize?: number;
 }
 
 export interface Comment {

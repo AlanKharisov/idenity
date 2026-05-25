@@ -35,6 +35,15 @@ pub struct Nft {
     /// ID of the master NFT record, present only on print-edition records.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub master_nft_id: Option<String>,
+    // ── Batch/collection fields (absent on regular single NFTs) ───────────────
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub batch_size: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -42,6 +51,7 @@ pub struct Nft {
 pub struct CreateNftRequest {
     pub title: String,
     pub description: String,
+    pub batch_name: Option<String>,
     #[serde(default)]
     pub tags: Vec<String>,
     pub category: Option<String>,
@@ -65,6 +75,7 @@ pub struct BatchItemMeta {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchNftInput {
+    pub batch_name: Option<String>,
     pub blockchain: String,
     pub currency: String,
     pub royalty: f64,

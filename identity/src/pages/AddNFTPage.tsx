@@ -18,13 +18,16 @@ const PLATFORM_TREASURY = umiPublicKey('2wZ2vKzRzY7ZxkRTRgTKVBDBVTqk1NfvGbQFgDxJ
 // The try/catch lets devnet skip the fee gracefully so minting always proceeds.
 async function sendCommission(umi: any, commissionLamports: number): Promise<void> {
     try {
-        const feeBlockhash = await umi.rpc.getLatestBlockhash();
-        await transferSol(umi, {
-            destination: PLATFORM_TREASURY,
-            amount:      lamports(commissionLamports),
-        })
-            .setBlockhash(feeBlockhash)
-            .sendAndConfirm(umi, { confirm: { strategy: { type: 'blockhash', ...feeBlockhash } } });
+        const feeBlockhash = await rpcWithRetry<any>(() => umi.rpc.getLatestBlockhash(), 'commission blockhash');
+        await rpcWithRetry(
+            () => transferSol(umi, {
+                destination: PLATFORM_TREASURY,
+                amount:      lamports(commissionLamports),
+            })
+                .setBlockhash(feeBlockhash)
+                .sendAndConfirm(umi, { confirm: { strategy: { type: 'blockhash', ...feeBlockhash } } }),
+            'commission send',
+        );
         console.log('[AddNFT] commission sent:', commissionLamports, 'lamports');
     } catch (feeErr: any) {
         // On devnet the treasury often doesn't exist yet → rent error.
@@ -39,6 +42,28 @@ const CURRENCIES  = ['SOL', 'UAH', 'USD'];
 const BLOCKCHAINS = [
     { id: 'solana', name: 'Solana', icon: '◎', currency: 'SOL', fee: '~$0.01' },
 ];
+
+async function rpcWithRetry<T>(
+    fn: () => Promise<T>,
+    label: string,
+    attempts = 5,
+): Promise<T> {
+    let lastErr: any;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+        try {
+            return await fn();
+        } catch (e: any) {
+            lastErr = e;
+            const msg = String(e?.message ?? e ?? '');
+            const isRateLimit = msg.includes('429') || /too many|rate.?limit/i.test(msg);
+            if (!isRateLimit || attempt === attempts - 1) throw e;
+            const delay = 500 * Math.pow(2, attempt) + Math.random() * 300;
+            console.warn(`[AddNFT] ${label}: RPC rate limited, retry in ${Math.round(delay)}ms (${attempt + 1}/${attempts})`);
+            await new Promise(r => setTimeout(r, delay));
+        }
+    }
+    throw lastErr;
+}
 
 // ─── Image compression ────────────────────────────────────────────────────────
 // Resizes to ≤ maxPx on the longest edge and re-encodes as JPEG.
@@ -268,6 +293,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 const form = new FormData();
                 compressedFiles.forEach(f => form.append('images[]', f));
                 form.append('metadata', JSON.stringify({
+                    batchName: collectionName.trim() || title.trim() || 'Collection',
                     blockchain, currency,
                     royalty: parseFloat(royalty),
                     forSale, tags, items,
@@ -410,7 +436,11 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     setUploadProgress('Step 1/4 — Compressing & uploading image…');
                     const editionForm = new FormData();
                     editionForm.append('image',    await compressImage(selectedFile!));
-                    editionForm.append('metadata', JSON.stringify({ ...baseMetadata, editionCount: numEditions }));
+                    editionForm.append('metadata', JSON.stringify({
+                        ...baseMetadata,
+                        batchName: collectionName.trim() || title.trim(),
+                        editionCount: numEditions,
+                    }));
                     const edResult = await apiCreateEditionNFTs(editionForm);
                     const { masterId, metadataUri, imageUrl, editionIds } = edResult;
                     console.log('[AddNFT] edition backend records created:', { masterId, editionIds });
@@ -424,7 +454,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     // Step 3/4 ── Build N createNft transactions, pre-sign with each
                     // mint keypair, then sign ALL with Phantom in one popup.
                     setUploadProgress(`Step 3/4 — Building ${numEditions} transactions…`);
-                    const sharedBlockhash = await umi.rpc.getLatestBlockhash();
+                    const sharedBlockhash = await rpcWithRetry<any>(() => umi.rpc.getLatestBlockhash(), 'editions blockhash');
                     const editionMintSigners: any[] = [];
                     const partiallySignedTxs: any[] = [];
 
@@ -450,34 +480,68 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                     const fullySignedTxs = await umi.identity.signAllTransactions(partiallySignedTxs);
 
                     // Step 4/4 ── Broadcast all quickly to beat blockhash expiration.
-                    const editionSigs: any[] = [];
+                    const sentEditions: { index: number; sig: any }[] = [];
+                    const sendErrors: { index: number; err: string }[] = [];
                     for (let i = 0; i < fullySignedTxs.length; i++) {
                         setUploadProgress(`Step 4/4 — Broadcasting edition ${i + 1}/${numEditions}…`);
-                        const sig = await umi.rpc.sendTransaction(fullySignedTxs[i], { skipPreflight: true });
-                        editionSigs.push(sig);
+                        try {
+                            const sig = await rpcWithRetry(
+                                () => umi.rpc.sendTransaction(fullySignedTxs[i], { skipPreflight: true }),
+                                `send edition ${i + 1}`,
+                            );
+                            sentEditions.push({ index: i, sig });
+                        } catch (err: any) {
+                            sendErrors.push({ index: i, err: String(err?.message ?? err) });
+                            console.warn(`[AddNFT] edition ${i + 1} send failed:`, err);
+                        }
                         await new Promise(r => setTimeout(r, 300));
                     }
 
-                    // Now confirm them sequentially.
-                    for (let i = 0; i < editionSigs.length; i++) {
-                        setUploadProgress(`Step 4/4 — Confirming edition ${i + 1}/${numEditions}…`);
+                    if (sentEditions.length === 0) {
+                        throw new Error(`All ${numEditions} editions failed to send: ${sendErrors[0]?.err ?? 'unknown error'}`);
+                    }
+
+                    // Confirmation on public devnet is frequently rate-limited.
+                    // Once a transaction is sent, a confirmation 429 must not abort
+                    // the already-created backend records or block wallet grouping.
+                    const confirmErrors: { index: number; err: string }[] = [];
+                    for (let i = 0; i < sentEditions.length; i++) {
+                        const { index, sig } = sentEditions[i];
+                        setUploadProgress(`Step 4/4 — Confirming edition ${i + 1}/${sentEditions.length}…`);
                         try {
-                            await umi.rpc.confirmTransaction(editionSigs[i], {
-                                strategy: { type: 'blockhash', ...sharedBlockhash },
-                            });
-                        } catch (err) {
-                            console.warn(`[AddNFT] edition ${i + 1} confirm error (ignoring devnet RPC issues):`, err);
+                            await rpcWithRetry(
+                                () => umi.rpc.confirmTransaction(sig, {
+                                    strategy: { type: 'blockhash', ...sharedBlockhash },
+                                }),
+                                `confirm edition ${index + 1}`,
+                                3,
+                            );
+                            console.log(`[AddNFT] edition ${index + 1} confirmed:`, editionMintSigners[index].publicKey);
+                        } catch (err: any) {
+                            confirmErrors.push({ index, err: String(err?.message ?? err) });
+                            console.warn(`[AddNFT] edition ${index + 1} confirm skipped after send (devnet RPC issue):`, err);
                         }
-                        console.log(`[AddNFT] edition ${i + 1} confirmed:`, editionMintSigners[i].publicKey);
-                        await apiUpdateNFT(editionIds[i], { mintAddress: editionMintSigners[i].publicKey });
+                    }
+
+                    const sentIndices = sentEditions.map(e => e.index).sort((a, b) => a - b);
+                    setUploadProgress(`Step 4/4 — Saving mint addresses (${sentIndices.length}/${numEditions})…`);
+                    await Promise.allSettled(
+                        sentIndices.map(i => apiUpdateNFT(editionIds[i], { mintAddress: editionMintSigners[i].publicKey })),
+                    );
+
+                    if (sendErrors.length > 0 || confirmErrors.length > 0) {
+                        console.warn('[AddNFT] edition mint completed with RPC warnings:', { sendErrors, confirmErrors });
                     }
 
                     // One combined post for the whole edition series.
                     setUploadProgress('Step 4/4 — Publishing to feed…');
+                    const sentEditionIds = sentIndices.map(i => editionIds[i]);
                     await apiCreatePost({
-                        nftImages:    editionIds.map(() => imageUrl),  // same art, N tokens
-                        walletNftIds: editionIds,
-                        title:        `${title.trim()} (${numEditions} editions)`,
+                        nftImages:    sentEditionIds.map(() => imageUrl),  // same art, N tokens
+                        walletNftIds: sentEditionIds,
+                        title:        sentEditionIds.length === numEditions
+                            ? `${title.trim()} (${numEditions} editions)`
+                            : `${title.trim()} (${sentEditionIds.length}/${numEditions} editions)`,
                         description:  description.trim(),
                         tags,
                         forSale,
@@ -626,6 +690,7 @@ const AddNFTPage: React.FC<AddNFTPageProps> = ({ preselectedNFT }) => {
                 price:       batchForSale && batchPrice ? parseFloat(batchPrice) : undefined,
             }));
             const metadata = {
+                batchName: 'Batch',
                 blockchain: batchBlockchain,
                 currency:   batchCurrency,
                 royalty:    parseFloat(batchRoyalty),

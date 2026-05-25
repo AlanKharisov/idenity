@@ -10,71 +10,81 @@ import { Icon } from '../components/brand';
 const DEFAULT_AVATAR = '/img/default-avatar.png';
 
 const FILTER_OPTIONS = [
-  'Trending', 'For Sale', 'Art', 'Music', 'Photography', 'Gaming', '3D', 'Collectible',
+  'All', 'For Sale', 'New', 'Art', 'Music',
 ];
 
-function CollectionGallery({ images, title }: { images: string[]; title: string }) {
+function HistoryIcon({ size = 18 }: { size?: number }) {
   return (
-    <div style={{ position: 'relative', width: '100%' }}>
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M3 12a9 9 0 1 0 3-6.7" />
+      <path d="M3 4v5h5" />
+      <path d="M12 7v5l3 2" />
+    </svg>
+  );
+}
+
+function CollectionGallery({ images, title }: { images: string[]; title: string }) {
+  const previewImages = images.slice(0, 4);
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        aspectRatio: '4 / 3',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
+        gridTemplateRows: '1fr 1fr',
+        gap: 6,
+        background: 'var(--bg-soft)',
+        padding: 6,
+      }}
+    >
+      {previewImages.map((src, idx) => (
+        <img
+          key={idx}
+          src={src || '/img/default-nft.png'}
+          alt={`${title} #${idx + 1}`}
+          loading="lazy"
+          style={{
+            width: '100%',
+            height: '100%',
+            minHeight: 0,
+            objectFit: 'cover',
+            borderRadius: 11,
+            display: 'block',
+            gridColumn: previewImages.length === 1 ? '1 / -1' : undefined,
+            gridRow: previewImages.length === 1 ? '1 / -1' : previewImages.length === 3 && idx === 0 ? '1 / 3' : undefined,
+          }}
+          onError={e => { (e.currentTarget as HTMLImageElement).src = '/img/default-nft.png'; }}
+        />
+      ))}
       <div
         style={{
           position: 'absolute',
           top: 12, left: 12, zIndex: 2,
-          background: 'rgba(0,0,0,0.5)',
+          background: 'rgba(6,77,58,0.9)',
           backdropFilter: 'blur(10px)',
           color: 'white',
           borderRadius: 999,
-          padding: '4px 10px',
-          fontSize: 11,
-          fontWeight: 600,
+          padding: '5px 10px',
+          fontSize: 12,
+          fontWeight: 800,
           pointerEvents: 'none',
         }}
       >
         {images.length} NFTs
       </div>
-      <div
-        className="scrollx"
-        style={{
-          display: 'flex',
-          gap: 8,
-          scrollSnapType: 'x mandatory',
-          borderRadius: 12,
-        }}
-      >
-        {images.map((src, idx) => (
-          <img
-            key={idx}
-            src={src || '/img/default-nft.png'}
-            alt={`${title} #${idx + 1}`}
-            loading="lazy"
-            style={{
-              width: '72%',
-              flexShrink: 0,
-              aspectRatio: '1 / 1',
-              objectFit: 'cover',
-              borderRadius: 12,
-              display: 'block',
-              scrollSnapAlign: 'start',
-            }}
-            onError={e => { (e.currentTarget as HTMLImageElement).src = '/img/default-nft.png'; }}
-          />
-        ))}
-        <div style={{ flexShrink: 0, width: 4 }} />
-      </div>
-      {images.length > 1 && (
-        <div style={{ display: 'flex', justifyContent: 'center', gap: 5, marginTop: 8 }}>
-          {images.map((_, i) => (
-            <div
-              key={i}
-              style={{
-                width: 6, height: 6,
-                borderRadius: 999,
-                background: i === 0 ? 'var(--primary)' : 'var(--border-strong)',
-              }}
-            />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -89,24 +99,30 @@ const HomePage: React.FC = () => {
   const [buyNft, setBuyNft] = useState<any | null>(null);
 
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [activeFilter, setActiveFilter] = useState('Trending');
+  const [activeFilter, setActiveFilter] = useState('All');
   const filterRef = useRef<HTMLDivElement>(null);
 
   const { attachObserver } = useViewHistory();
 
-  const filteredPosts = posts.filter(post => {
-    const q = searchQuery.toLowerCase();
-    const matchesSearch = !q || (
-      post.title?.toLowerCase().includes(q) ||
-      post.description?.toLowerCase().includes(q) ||
-      post.tags?.some(tag => tag.toLowerCase().includes(q))
-    );
-    let matchesFilter = true;
-    if (activeFilter === 'Trending') matchesFilter = true;
-    else if (activeFilter === 'For Sale') matchesFilter = !!post.forSale;
-    else matchesFilter = post.category === activeFilter;
-    return matchesSearch && matchesFilter;
-  });
+  const filteredPosts = posts
+    .filter(post => {
+      const q = searchQuery.toLowerCase();
+      const matchesSearch = !q || (
+        post.title?.toLowerCase().includes(q) ||
+        post.description?.toLowerCase().includes(q) ||
+        post.userName?.toLowerCase().includes(q) ||
+        post.tags?.some(tag => tag.toLowerCase().includes(q))
+      );
+      let matchesFilter = true;
+      if (activeFilter === 'For Sale') matchesFilter = !!post.forSale;
+      else if (activeFilter === 'New') matchesFilter = true;
+      else if (activeFilter !== 'All') matchesFilter = post.category === activeFilter;
+      return matchesSearch && matchesFilter;
+    })
+    .sort((a, b) => {
+      if (activeFilter !== 'New') return 0;
+      return new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
+    });
 
   const handleLike = async (post: any) => {
     if (!post.id || !currentUser) return;
@@ -134,15 +150,44 @@ const HomePage: React.FC = () => {
   }
 
   return (
-    <div className="page home-page active mi-screen-pad" style={{ paddingTop: 12 }}>
-      {/* Top bar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+    <div className="page home-page active mi-screen-pad" style={{ paddingTop: 18, paddingBottom: 148 }}>
+      {/* Marketplace header */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h1 className="h2" style={{ fontSize: 26, letterSpacing: '-0.03em' }}>Marketplace</h1>
+            <p style={{ margin: '5px 0 0', color: 'var(--text-muted)', fontSize: 14, lineHeight: 1.45 }}>
+              Discover, collect, and trade verified digital items.
+            </p>
+          </div>
+          <button
+            onClick={() => setHistoryOpen(true)}
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: 14,
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow-sm)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              position: 'relative',
+              color: 'var(--text)',
+              flex: '0 0 auto',
+            }}
+            aria-label="View history"
+          >
+            <HistoryIcon size={19} />
+          </button>
+        </div>
         <div
           style={{
-            flex: 1,
+            marginTop: 16,
             background: 'var(--bg-soft)',
-            borderRadius: 999,
-            padding: '10px 14px',
+            border: '1px solid var(--border)',
+            borderRadius: 16,
+            padding: '12px 14px',
             display: 'flex',
             alignItems: 'center',
             gap: 10,
@@ -166,41 +211,24 @@ const HomePage: React.FC = () => {
             }}
           />
         </div>
-        <button
-          onClick={() => setHistoryOpen(true)}
-          style={{
-            width: 40,
-            height: 40,
-            borderRadius: 12,
-            background: 'var(--bg-soft)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            position: 'relative',
-            color: 'var(--text)',
-          }}
-          aria-label="History"
-        >
-          <Icon.Bell size={18} />
-          <span
-            style={{
-              position: 'absolute',
-              top: 8, right: 8,
-              width: 8, height: 8,
-              borderRadius: 4,
-              background: 'var(--primary)',
-            }}
-          />
-        </button>
       </div>
 
       {/* Category chips */}
-      <div ref={filterRef} className="scrollx" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+      <div ref={filterRef} className="scrollx" style={{ display: 'flex', gap: 8, marginBottom: 16, paddingBottom: 2 }}>
         {FILTER_OPTIONS.map(opt => (
           <span
             key={opt}
             onClick={() => setActiveFilter(opt)}
             className={`chip ${activeFilter === opt ? 'chip-active' : ''}`}
+            style={{
+              padding: '8px 13px',
+              fontSize: 13,
+              fontWeight: activeFilter === opt ? 800 : 650,
+              background: activeFilter === opt ? 'var(--primary)' : 'var(--bg-card)',
+              color: activeFilter === opt ? 'white' : 'var(--text-muted)',
+              borderColor: activeFilter === opt ? 'var(--primary)' : 'var(--border)',
+              boxShadow: activeFilter === opt ? '0 8px 18px rgba(12,90,68,0.16)' : 'var(--shadow-sm)',
+            }}
           >
             {opt}
           </span>
@@ -215,59 +243,15 @@ const HomePage: React.FC = () => {
           <p className="muted" style={{ fontSize: 13 }}>Try a different search or filter</p>
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {filteredPosts.map(post => (
             <div
               key={post.id}
               className="card"
               ref={el => { if (el && post.id) attachObserver(el, post.id); }}
-              style={{ padding: 16 }}
+              style={{ padding: 0, overflow: 'hidden', boxShadow: 'var(--shadow-sm)' }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div className="avatar">
-                  {post.userAvatar ? (
-                    <img
-                      src={post.userAvatar}
-                      alt="Avatar"
-                      onError={e => { const img = e.currentTarget as HTMLImageElement; img.onerror = null; img.src = DEFAULT_AVATAR; }}
-                    />
-                  ) : (
-                    (post.userName || '?').slice(0, 1).toUpperCase()
-                  )}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{post.userName}</div>
-                  <div style={{ fontSize: 12, color: 'var(--text-faint)' }}>
-                    {formatTime(post.createdAt)}
-                  </div>
-                </div>
-                <button style={{ color: 'var(--text-faint)', padding: 4 }} aria-label="More">
-                  <Icon.More />
-                </button>
-              </div>
-
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: '-0.02em' }}>{post.title}</div>
-                {post.description && (
-                  <div style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 8px' }}>
-                    {post.description}
-                  </div>
-                )}
-                {post.tags && post.tags.length > 0 && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {post.tags.map((t: string) => (
-                      <span
-                        key={t}
-                        style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}
-                      >
-                        #{t}
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div style={{ marginTop: 12, position: 'relative', overflow: 'hidden', borderRadius: 12 }}>
+              <div style={{ position: 'relative', overflow: 'hidden', background: 'var(--bg-soft)' }}>
                 {post.nftImages && post.nftImages.length > 0 ? (
                   <CollectionGallery images={post.nftImages} title={post.title} />
                 ) : (
@@ -277,10 +261,9 @@ const HomePage: React.FC = () => {
                     loading="lazy"
                     style={{
                       width: '100%',
-                      borderRadius: 12,
+                      aspectRatio: '4 / 3',
                       objectFit: 'cover',
                       display: 'block',
-                      maxHeight: 380,
                     }}
                     onError={e => { (e.currentTarget as HTMLImageElement).src = '/img/default-nft.png'; }}
                   />
@@ -291,12 +274,13 @@ const HomePage: React.FC = () => {
                     style={{
                       position: 'absolute',
                       top: 12, right: 12,
-                      padding: '4px 10px',
+                      padding: '6px 11px',
                       borderRadius: 999,
-                      background: 'rgba(0,0,0,0.5)',
+                      background: 'rgba(6,77,58,0.9)',
                       backdropFilter: 'blur(10px)',
                       color: 'white',
-                      fontSize: 11,
+                      fontSize: 12,
+                      fontWeight: 800,
                     }}
                   >
                     {post.price} {post.currency || 'SOL'}
@@ -304,16 +288,109 @@ const HomePage: React.FC = () => {
                 )}
               </div>
 
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  marginTop: 14,
-                  color: 'var(--text-muted)',
-                  alignItems: 'center',
-                }}
-              >
-                <div style={{ display: 'flex', gap: 18, fontSize: 13, alignItems: 'center' }}>
+              <div style={{ padding: 13 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        fontSize: 17,
+                        lineHeight: 1.25,
+                        fontWeight: 800,
+                        letterSpacing: '-0.02em',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}
+                    >
+                      {post.title}
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 7, minWidth: 0 }}>
+                      <div className="avatar" style={{ width: 24, height: 24, fontSize: 11 }}>
+                        {post.userAvatar ? (
+                          <img
+                            src={post.userAvatar}
+                            alt="Avatar"
+                            onError={e => { const img = e.currentTarget as HTMLImageElement; img.onerror = null; img.src = DEFAULT_AVATAR; }}
+                          />
+                        ) : (
+                          (post.userName || '?').slice(0, 1).toUpperCase()
+                        )}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontSize: 13,
+                            fontWeight: 700,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {post.userName || 'Unknown creator'}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button style={{ color: 'var(--text-faint)', padding: 4, flex: '0 0 auto' }} aria-label="More">
+                    <Icon.More />
+                  </button>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    marginTop: 12,
+                    paddingTop: 11,
+                    borderTop: '1px solid var(--border)',
+                  }}
+                >
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-faint)', fontWeight: 700, textTransform: 'uppercase' }}>
+                      {post.forSale && post.price ? 'Price' : 'Status'}
+                    </div>
+                    <div
+                      className={post.forSale && post.price ? 'mono' : undefined}
+                      style={{
+                        marginTop: 2,
+                        fontSize: 14,
+                        fontWeight: 800,
+                        color: post.forSale && post.price ? 'var(--primary-ink)' : 'var(--text-muted)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {post.forSale && post.price ? `${post.price} ${post.currency || 'SOL'}` : 'Not listed'}
+                    </div>
+                  </div>
+
+                  {post.forSale && post.price && post.userId !== currentUser?.uid ? (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => setBuyNft(post)}
+                      style={{ padding: '11px 20px', fontSize: 14, fontWeight: 800, flex: '0 0 auto', minWidth: 104 }}
+                    >
+                      Buy now
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-primary"
+                      onClick={() => post.id && setSelectedPost(selectedPost === post.id ? null : post.id)}
+                      style={{ padding: '11px 20px', fontSize: 14, fontWeight: 800, flex: '0 0 auto', minWidth: 104 }}
+                    >
+                      View item
+                    </button>
+                  )}
+                </div>
+
+              <div style={{ marginTop: 10 }}>
+                <div style={{ display: 'flex', gap: 14, fontSize: 12, alignItems: 'center', color: 'var(--text-faint)' }}>
                   <span
                     onClick={() => handleLike(post)}
                     style={{
@@ -324,13 +401,13 @@ const HomePage: React.FC = () => {
                       color: post.liked ? 'var(--danger)' : 'inherit',
                     }}
                   >
-                    <Icon.Heart filled={post.liked} /> {post.likes || 0}
+                    <Icon.Heart filled={post.liked} size={16} /> {post.likes || 0}
                   </span>
                   <span
                     onClick={() => post.id && setSelectedPost(selectedPost === post.id ? null : post.id)}
                     style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
                   >
-                    <Icon.Comment /> {post.comments?.length || 0}
+                    <Icon.Comment size={16} /> {post.comments?.length || 0}
                   </span>
                   <span
                     onClick={() =>
@@ -342,18 +419,12 @@ const HomePage: React.FC = () => {
                     }
                     style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
                   >
-                    <Icon.Share />
+                    <Icon.Share size={16} />
+                  </span>
+                  <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-faint)' }}>
+                    {formatTime(post.createdAt)}
                   </span>
                 </div>
-                {post.forSale && post.price && post.userId !== currentUser?.uid && (
-                  <button
-                    className="btn btn-primary"
-                    onClick={() => setBuyNft(post)}
-                    style={{ padding: '8px 14px', fontSize: 13 }}
-                  >
-                    Buy {post.price} {post.currency || 'SOL'}
-                  </button>
-                )}
               </div>
 
               {selectedPost === post.id && (
@@ -407,6 +478,7 @@ const HomePage: React.FC = () => {
                   </div>
                 </div>
               )}
+              </div>
             </div>
           ))}
         </div>
