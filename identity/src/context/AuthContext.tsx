@@ -7,6 +7,8 @@ import {
     updateProfile,
     signOut,
     deleteUser,
+    getRedirectResult,
+    User,
 } from 'firebase/auth';
 import { getLocationFromCoords, getLocationByIP } from '../services/geocoding';
 import { apiRegister, apiMe, apiUpdateProfile } from '../services/apiClient';
@@ -93,6 +95,30 @@ const mapUser = (u: any): UserData => ({
     deliveryAddress: u.deliveryAddress,
 });
 
+const syncFirebaseUser = async (firebaseUser: User) => {
+    let userData = await apiMe().catch(() => null);
+
+    if (!userData) {
+        // User exists in Firebase but not in Rust API (common after signInWithRedirect on mobile)
+        const displayName = firebaseUser.displayName || 'User';
+        const nameParts   = displayName.split(' ');
+        const username    = (nameParts[0] || 'user').toLowerCase() + firebaseUser.uid.slice(-4);
+        try {
+            await apiRegister({
+                uid:      firebaseUser.uid,
+                name:     displayName,
+                username,
+                email:    firebaseUser.email || '',
+            });
+            userData = await apiMe().catch(() => null);
+        } catch (regErr) {
+            console.error('Auto registration in AuthContext failed:', regErr);
+        }
+    }
+
+    return userData ? mapUser(userData) : null;
+};
+
 // ─── Provider ─────────────────────────────────────────────────────────────────
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     const [currentUser, setCurrentUser] = useState<UserData | null>(null);
@@ -121,31 +147,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     useEffect(() => {
+        getRedirectResult(auth)
+            .then(async result => {
+                if (!result?.user) return;
+                setCurrentUser(await syncFirebaseUser(result.user));
+            })
+            .catch(e => {
+                console.error('Redirect auth result error:', e);
+            });
+
         const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
             try {
                 if (firebaseUser) {
-                    // Fetch profile from Rust API (protected, Firebase JWT required)
-                    let userData = await apiMe().catch(() => null);
-                    
-                    if (!userData) {
-                        // User exists in Firebase but not in Rust API (common after signInWithRedirect on mobile)
-                        const displayName = firebaseUser.displayName || 'User';
-                        const nameParts   = displayName.split(' ');
-                        const username    = (nameParts[0] || 'user').toLowerCase() + firebaseUser.uid.slice(-4);
-                        try {
-                            await apiRegister({
-                                uid:      firebaseUser.uid,
-                                name:     displayName,
-                                username,
-                                email:    firebaseUser.email || '',
-                            });
-                            userData = await apiMe().catch(() => null);
-                        } catch (regErr) {
-                            console.error('Auto registration in AuthContext failed:', regErr);
-                        }
-                    }
-
-                    setCurrentUser(userData ? mapUser(userData) : null);
+                    setCurrentUser(await syncFirebaseUser(firebaseUser));
                 } else {
                     setCurrentUser(null);
                 }
