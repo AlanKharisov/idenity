@@ -99,7 +99,8 @@ impl SolanaService {
         futures::future::join_all(futures).await
     }
 
-    /// Convert a listing amount to SOL using CoinGecko's current spot quote.
+    /// Convert a listing amount to SOL using Coinbase's unauthenticated spot
+    /// price endpoint.
     /// SOL listings need no network lookup. Fiat quotes are intentionally
     /// created on the server so the client cannot choose the amount paid.
     pub async fn listing_price_in_sol(&self, amount: f64, currency: &str) -> Result<f64> {
@@ -117,17 +118,12 @@ impl SolanaService {
             ));
         }
 
-        let vs_currency = normalized.to_ascii_lowercase();
+        let pair = format!("SOL-{normalized}");
         let response = self
             .http
-            .get("https://api.coingecko.com/api/v3/simple/price")
+            .get(format!("https://api.coinbase.com/v2/prices/{pair}/spot"))
             .header(reqwest::header::USER_AGENT, "MarkIdentity/2.0")
             .header(reqwest::header::ACCEPT, "application/json")
-            .query(&[
-                ("ids", "solana"),
-                ("vs_currencies", vs_currency.as_str()),
-                ("include_last_updated_at", "true"),
-            ])
             .send()
             .await
             .context("Failed to request the SOL exchange rate")?;
@@ -143,8 +139,9 @@ impl SolanaService {
             .json()
             .await
             .context("Failed to parse the SOL exchange rate")?;
-        let fiat_per_sol = body["solana"][&vs_currency]
-            .as_f64()
+        let fiat_per_sol = body["data"]["amount"]
+            .as_str()
+            .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| value.is_finite() && *value > 0.0)
             .context("SOL exchange rate is unavailable")?;
 
