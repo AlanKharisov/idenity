@@ -108,6 +108,20 @@ pub struct TransferNftRequest {
     pub seller_id: String,
     /// Firestore document ID of the marketplace post to mark as sold.
     pub post_id: String,
+    /// Confirmed Solana transaction signature for this purchase.
+    pub signature: String,
+    /// Connected Phantom address that signed the transaction.
+    pub payer_address: String,
+    /// Short-lived server quote that fixes the exact SOL amount.
+    pub quote_id: String,
+}
+
+/// Body for `POST /api/nfts/:id/payment-quote`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PaymentQuoteRequest {
+    /// Firestore marketplace post that contains the authoritative price.
+    pub post_id: String,
 }
 
 /// Response from `POST /api/nfts/editions`.

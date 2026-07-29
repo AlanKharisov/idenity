@@ -11,7 +11,7 @@ use uuid::Uuid;
 use crate::{
     errors::{ApiResult, AppError},
     middleware::auth::AuthenticatedUser,
-    models::{BatchItemResult, BatchNftInput, BatchUploadResponse, CreateEditionResponse, CreateNftRequest, Nft, TransferNftRequest, UpdateNftRequest},
+    models::{BatchItemResult, BatchNftInput, BatchUploadResponse, CreateEditionResponse, CreateNftRequest, Nft, PaymentQuoteRequest, TransferNftRequest, UpdateNftRequest},
     notification_helpers,
     services::StorageClient,
     AppState,
@@ -26,6 +26,15 @@ fn ext_from_ct(ct: &str) -> &str {
         "image/webp" => "webp",
         _ => "jpg",
     }
+}
+
+fn collection_title_after_sale(title: &str, remaining: usize) -> String {
+    if let Some((base, suffix)) = title.rsplit_once(" (") {
+        if suffix.ends_with(" editions)") {
+            return format!("{} ({} editions)", base, remaining);
+        }
+    }
+    title.to_owned()
 }
 
 /// Load the `nfts` array from `marki_wallets/{uid}`.
@@ -669,6 +678,114 @@ pub async fn create_edition_nfts(
     })))
 }
 
+/// `POST /api/nfts/:id/payment-quote`
+///
+/// Returns a short-lived, server-authoritative SOL amount for a marketplace
+/// listing. Fiat prices are converted here rather than in the app, so the
+/// amount later verified on-chain cannot be manipulated by the client.
+pub async fn create_payment_quote(
+    State(state): State<Arc<AppState>>,
+    Extension(auth): Extension<AuthenticatedUser>,
+    Path(nft_id): Path<String>,
+    Json(body): Json<PaymentQuoteRequest>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let post_doc = state
+        .firestore
+        .get("posts", &body.post_id)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("Post {} not found", body.post_id)))?;
+
+    if !post_doc
+        .get("forSale")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return Err(AppError::BadRequest("This NFT is no longer for sale".to_owned()));
+    }
+
+    let seller_id = post_doc
+        .get("userId")
+        .and_then(|value| value.as_str())
+        .ok_or_else(|| AppError::BadRequest("Listing has no seller".to_owned()))?;
+    if seller_id == auth.uid {
+        return Err(AppError::BadRequest("Cannot buy your own NFT".to_owned()));
+    }
+
+    let single_nft_id = post_doc.get("walletNftId").and_then(|value| value.as_str());
+    let collection_contains_nft = post_doc
+        .get("walletNftIds")
+        .and_then(|value| value.as_array())
+        .map(|ids| ids.iter().any(|id| id.as_str() == Some(nft_id.as_str())))
+        .unwrap_or(false);
+    if single_nft_id != Some(nft_id.as_str()) && !collection_contains_nft {
+        return Err(AppError::BadRequest(
+            "NFT does not belong to this marketplace listing".to_owned(),
+        ));
+    }
+
+    let price = post_doc
+        .get("price")
+        .and_then(|value| value.as_f64())
+        .filter(|value| value.is_finite() && *value > 0.0)
+        .ok_or_else(|| AppError::BadRequest("Listing has no valid price".to_owned()))?;
+    let currency = post_doc
+        .get("currency")
+        .and_then(|value| value.as_str())
+        .unwrap_or("SOL")
+        .trim()
+        .to_ascii_uppercase();
+
+    let price_sol = state
+        .solana
+        .listing_price_in_sol(price, &currency)
+        .await
+        .map_err(|error| AppError::BadRequest(format!("Unable to quote SOL payment: {error}")))?;
+
+    const LAMPORTS_PER_SOL: f64 = 1_000_000_000.0;
+    const PLATFORM_FEE: f64 = 0.01;
+    let seller_lamports = (price_sol * LAMPORTS_PER_SOL).round() as u64;
+    let fee_lamports = (price_sol * PLATFORM_FEE * LAMPORTS_PER_SOL).round() as u64;
+    if seller_lamports == 0 {
+        return Err(AppError::BadRequest("SOL quote is too small to pay".to_owned()));
+    }
+
+    let quote_id = Uuid::new_v4().to_string();
+    let created_at = Utc::now();
+    let expires_at_unix = (created_at + chrono::Duration::minutes(10)).timestamp();
+    state
+        .firestore
+        .set(
+            "payment_quotes",
+            &quote_id,
+            &json!({
+                "buyerId": auth.uid,
+                "sellerId": seller_id,
+                "postId": body.post_id,
+                "nftId": nft_id,
+                "sourcePrice": price,
+                "sourceCurrency": currency,
+                "sellerLamports": seller_lamports,
+                "feeLamports": fee_lamports,
+                "expiresAtUnix": expires_at_unix,
+                "used": false,
+                "createdAt": created_at.to_rfc3339(),
+            }),
+        )
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+
+    Ok(Json(json!({
+        "quoteId": quote_id,
+        "sourcePrice": price,
+        "sourceCurrency": currency,
+        "sellerLamports": seller_lamports,
+        "feeLamports": fee_lamports,
+        "totalLamports": seller_lamports + fee_lamports,
+        "expiresAtUnix": expires_at_unix,
+    })))
+}
+
 /// `POST /api/nfts/:id/transfer`
 ///
 /// Off-chain ownership sync called by the buyer immediately after an on-chain
@@ -690,6 +807,156 @@ pub async fn transfer_nft(
     if buyer_uid == &body.seller_id {
         return Err(AppError::BadRequest("Cannot transfer an NFT to yourself".to_owned()));
     }
+
+    // The server, not the client, is authoritative for seller, price,
+    // destination wallet and the NFT IDs included in the listing.
+    let post_doc = state
+        .firestore
+        .get("posts", &body.post_id)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?
+        .ok_or_else(|| AppError::NotFound(format!("Post {} not found", body.post_id)))?;
+
+    let post_seller = post_doc
+        .get("userId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::BadRequest("Listing has no seller".to_owned()))?;
+    if post_seller != body.seller_id {
+        return Err(AppError::BadRequest("Listing seller does not match".to_owned()));
+    }
+
+    let single_nft_id = post_doc.get("walletNftId").and_then(|v| v.as_str());
+    let collection_nft_ids: Vec<String> = post_doc
+        .get("walletNftIds")
+        .and_then(|v| v.as_array())
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|id| id.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+    if single_nft_id != Some(nft_id.as_str())
+        && !collection_nft_ids.iter().any(|id| id == &nft_id)
+    {
+        return Err(AppError::BadRequest(
+            "NFT does not belong to this marketplace listing".to_owned(),
+        ));
+    }
+
+    let currency = post_doc
+        .get("currency")
+        .and_then(|v| v.as_str())
+        .unwrap_or("SOL")
+        .trim()
+        .to_ascii_uppercase();
+    let price = post_doc
+        .get("price")
+        .and_then(|v| v.as_f64())
+        .filter(|price| *price > 0.0)
+        .ok_or_else(|| AppError::BadRequest("Listing has no valid price".to_owned()))?;
+    let seller_address = post_doc
+        .get("sellerAddress")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| AppError::BadRequest("Seller has no connected Phantom wallet".to_owned()))?;
+    if !state.solana.is_valid_address(seller_address)
+        || !state.solana.is_valid_address(&body.payer_address)
+    {
+        return Err(AppError::BadRequest(
+            "Buyer or seller wallet address is invalid; reconnect and relist the wallet".to_owned(),
+        ));
+    }
+
+    let buyer_wallet_doc = state
+        .firestore
+        .get("crypto_wallets", buyer_uid)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+    let payer_is_connected = buyer_wallet_doc
+        .as_ref()
+        .and_then(|doc| doc.get("wallets"))
+        .and_then(|v| v.as_array())
+        .map(|wallets| {
+            wallets.iter().any(|wallet| {
+                wallet.get("address").and_then(|v| v.as_str())
+                    == Some(body.payer_address.as_str())
+            })
+        })
+        .unwrap_or(false);
+    if !payer_is_connected {
+        return Err(AppError::BadRequest(
+            "Payment wallet is not connected to this account".to_owned(),
+        ));
+    }
+
+    let quote = state
+        .firestore
+        .get("payment_quotes", &body.quote_id)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?
+        .ok_or_else(|| AppError::BadRequest("Payment quote was not found".to_owned()))?;
+    let quote_matches = quote.get("buyerId").and_then(|v| v.as_str()) == Some(buyer_uid)
+        && quote.get("sellerId").and_then(|v| v.as_str()) == Some(body.seller_id.as_str())
+        && quote.get("postId").and_then(|v| v.as_str()) == Some(body.post_id.as_str())
+        && quote.get("nftId").and_then(|v| v.as_str()) == Some(nft_id.as_str())
+        && quote.get("sourceCurrency").and_then(|v| v.as_str()) == Some(currency.as_str())
+        && quote
+            .get("sourcePrice")
+            .and_then(|v| v.as_f64())
+            .map(|quoted| (quoted - price).abs() < f64::EPSILON)
+            .unwrap_or(false);
+    if !quote_matches {
+        return Err(AppError::BadRequest(
+            "Payment quote does not match this listing".to_owned(),
+        ));
+    }
+    if quote.get("used").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return Err(AppError::Conflict("Payment quote was already used".to_owned()));
+    }
+    if quote
+        .get("expiresAtUnix")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0)
+        <= Utc::now().timestamp()
+    {
+        return Err(AppError::BadRequest(
+            "Payment quote expired; request a new quote".to_owned(),
+        ));
+    }
+    let seller_lamports = quote
+        .get("sellerLamports")
+        .and_then(|v| v.as_u64())
+        .filter(|value| *value > 0)
+        .ok_or_else(|| AppError::BadRequest("Payment quote has no valid amount".to_owned()))?;
+    let fee_lamports = quote
+        .get("feeLamports")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    if state
+        .firestore
+        .get("processed_payments", &body.signature)
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?
+        .is_some()
+    {
+        return Err(AppError::Conflict(
+            "This Solana payment was already used".to_owned(),
+        ));
+    }
+
+    const PLATFORM_TREASURY: &str = "2wZ2vKzRzY7ZxkRTRgTKVBDBVTqk1NfvGbQFgDxJAr9X";
+    state
+        .solana
+        .verify_payment(
+            &body.signature,
+            &body.payer_address,
+            seller_address,
+            seller_lamports,
+            PLATFORM_TREASURY,
+            fee_lamports,
+        )
+        .await
+        .map_err(|e| AppError::BadRequest(format!("Payment verification failed: {e}")))?;
 
     // ── a) Remove NFT from seller's wallet ────────────────────────────────────
     let mut seller_nfts = load_nfts(&state, &body.seller_id).await?;
@@ -728,26 +995,97 @@ pub async fn transfer_nft(
     buyer_nfts.push(transferred);
     save_nfts(&state, buyer_uid, &buyer_nfts).await?;
 
-    // ── d) Pull post details for notification, then delete it ─────────────────
-    // We keep the same delete-the-post semantics as marketplace::buy_nft so
-    // the listing actually disappears from the feed; previously this only
-    // flipped `forSale: false`, leaving the card visible if the feed didn't
-    // filter on that flag.
-    let post_doc = state.firestore.get("posts", &body.post_id).await
-        .map_err(|e| AppError::Firebase(e.to_string()))?;
-    let nft_title = post_doc.as_ref()
-        .and_then(|d| d.get("title").and_then(|v| v.as_str()))
+    // ── d) Remove the purchased item from the listing. Collection posts stay
+    // live until their final edition is sold.
+    let nft_title = post_doc
+        .get("title")
+        .and_then(|v| v.as_str())
         .unwrap_or("NFT")
         .to_owned();
-    let price = post_doc.as_ref()
-        .and_then(|d| d.get("price").and_then(|v| v.as_f64()))
-        .unwrap_or(0.0);
-    let currency = post_doc.as_ref()
-        .and_then(|d| d.get("currency").and_then(|v| v.as_str()))
-        .unwrap_or("SOL")
-        .to_owned();
+    if collection_nft_ids.is_empty() {
+        state
+            .firestore
+            .delete("posts", &body.post_id)
+            .await
+            .map_err(|e| AppError::Firebase(e.to_string()))?;
+    } else {
+        let purchased_index = collection_nft_ids
+            .iter()
+            .position(|id| id == &nft_id)
+            .ok_or_else(|| AppError::BadRequest("Collection item not found".to_owned()))?;
+        let mut remaining_ids = collection_nft_ids;
+        remaining_ids.remove(purchased_index);
 
-    let _ = state.firestore.delete("posts", &body.post_id).await;
+        let mut remaining_images: Vec<String> = post_doc
+            .get("nftImages")
+            .and_then(|v| v.as_array())
+            .map(|images| {
+                images
+                    .iter()
+                    .filter_map(|image| image.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if purchased_index < remaining_images.len() {
+            remaining_images.remove(purchased_index);
+        }
+
+        if remaining_ids.is_empty() {
+            state
+                .firestore
+                .delete("posts", &body.post_id)
+                .await
+                .map_err(|e| AppError::Firebase(e.to_string()))?;
+        } else {
+            let updated_title = collection_title_after_sale(&nft_title, remaining_ids.len());
+            let primary_image = remaining_images.first().cloned().unwrap_or_default();
+            state
+                .firestore
+                .update(
+                    "posts",
+                    &body.post_id,
+                    &json!({
+                        "walletNftIds": remaining_ids,
+                        "nftImages": remaining_images,
+                        "nftImage": primary_image,
+                        "title": updated_title,
+                    }),
+                )
+                .await
+                .map_err(|e| AppError::Firebase(e.to_string()))?;
+        }
+    }
+
+    state
+        .firestore
+        .set(
+            "processed_payments",
+            &body.signature,
+            &json!({
+                "buyerId": buyer_uid,
+                "sellerId": body.seller_id,
+                "postId": body.post_id,
+                "nftId": nft_id,
+                "payerAddress": body.payer_address,
+                "createdAt": Utc::now().to_rfc3339(),
+            }),
+        )
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
+
+    state
+        .firestore
+        .update(
+            "payment_quotes",
+            &body.quote_id,
+            &json!({
+                "used": true,
+                "signature": body.signature,
+                "usedAt": Utc::now().to_rfc3339(),
+            }),
+        )
+        .await
+        .map_err(|e| AppError::Firebase(e.to_string()))?;
 
     // ── e) Notifications: buyer "you bought it", seller "you sold it" ─────────
     let buyer_display = state.firestore.get("users", buyer_uid).await.ok().flatten()

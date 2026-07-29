@@ -52,6 +52,7 @@ pub fn api_router(state: Arc<AppState>) -> Router<Arc<AppState>> {
             .route("/:id",          get(nfts::get_nft))
             .route("/:id",          put(nfts::update_nft))
             .route("/:id",          delete(nfts::delete_nft))
+            .route("/:id/payment-quote", post(nfts::create_payment_quote))
             .route("/:id/transfer", post(nfts::transfer_nft))
         )
         // Posts / feed
