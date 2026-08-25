@@ -1,19 +1,19 @@
-# idenity
+# MARKI
 
-A full-stack product identity platform combining digital ownership, marketplace workflows, QR/NFC verification, and company operations.
+A full-stack phygital identity platform for digital ownership, product verification, marketplace workflows, and company operations.
 
-[Web application](https://alankharisov.github.io/idenity/)
+[Live web app](https://alankharisov.github.io/MARKI/) · [GitHub repository](https://github.com/AlanKharisov/MARKI)
 
 ## Overview
 
-idenity connects a consumer-facing product and NFT experience with the operational tools companies need to create, distribute, and verify digital product records. The repository is a monorepo containing a Rust API, a React/Capacitor client, and a dedicated administration interface.
+MARKI connects a consumer-facing product and digital-ownership experience with the operational tools companies need to create, distribute, manage, and verify digital product records. The repository is a monorepo containing a Rust API, a React/Capacitor client, and a dedicated administration interface.
 
 ## Core capabilities
 
 - Firebase-backed registration and authenticated API access.
-- Create, edit, transfer, and batch-generate NFT-style product records.
+- Create, edit, transfer, and batch-generate digital product records.
 - Marketplace purchase and cash-on-delivery workflows.
-- Company CRM views for orders and product operations.
+- Company CRM views for orders, products, and operations.
 - Delivery creation, tracking, checkpoints, and receipt confirmation.
 - QR and NFC binding and verification.
 - Posts, likes, comments, and user notifications.
@@ -41,7 +41,7 @@ Consumer and company app         Platform administration
                                       service integrations
 ```
 
-### Repository layout
+## Repository layout
 
 ```text
 .
@@ -66,8 +66,7 @@ Consumer and company app         Platform administration
 
 ### Frontend and mobile
 
-- React
-- TypeScript
+- React and TypeScript
 - Vite and Create React App/Rewired
 - Firebase web SDK
 - Capacitor
@@ -78,10 +77,10 @@ Consumer and company app         Platform administration
 Most routes require a Firebase ID token.
 
 | Area | Representative endpoints |
-|---|---|
+| --- | --- |
 | Health | `GET /health` |
 | Registration | `POST /api/auth/register` |
-| NFTs/products | `/api/nfts`, `/api/nfts/batch`, `/api/nfts/:id/transfer` |
+| Products | `/api/nfts`, `/api/nfts/batch`, `/api/nfts/:id/transfer` |
 | Feed | `/api/posts`, `/api/posts/:id/like`, `/api/posts/:id/comments` |
 | Marketplace | `/api/marketplace/buy`, `/api/marketplace/cod` |
 | Orders and deliveries | `/api/cod-orders`, `/api/deliveries/*` |
@@ -90,7 +89,7 @@ Most routes require a Firebase ID token.
 | Administration | `/api/admin/companies/*` |
 | AI | `POST /api/ai/generate` |
 
-## Run locally
+## Getting started
 
 ### Prerequisites
 
@@ -107,14 +106,14 @@ cp api/.env.example api/.env
 Populate the local file without committing real values:
 
 | Variable | Purpose |
-|---|---|
-| `FIREBASE_PROJECT_ID` | Firebase/Google Cloud project |
+| --- | --- |
+| `FIREBASE_PROJECT_ID` | Firebase / Google Cloud project |
 | `FIREBASE_API_KEY` | Firebase web API key used for Auth REST calls |
 | `FIREBASE_STORAGE_BUCKET` | Storage bucket |
 | `FIREBASE_SERVICE_ACCOUNT_JSON` | Service-account JSON supplied as a secret |
 | `SOLANA_RPC_URL` | Solana RPC endpoint |
 | `PORT` | API port; defaults to `8080` |
-| `ALLOWED_ORIGIN` | Single browser origin allowed by CORS |
+| `ALLOWED_ORIGIN` | Browser origin allowed by CORS |
 | `ADMIN_UIDS` | Comma-separated Firebase UIDs with admin access |
 
 ```bash
@@ -154,22 +153,11 @@ The Rust API and both frontends build successfully in the audited revision. The 
 
 ## Deployment
 
-- Main web app: GitHub Pages at [alankharisov.github.io/idenity](https://alankharisov.github.io/idenity/).
-- API: Docker/Render configuration is included in `Dockerfile` and `render.yaml`.
-- Android: Capacitor scripts are available in `identity/package.json`.
+- **Web app:** GitHub Pages at [alankharisov.github.io/MARKI](https://alankharisov.github.io/MARKI/).
+- **API:** Docker and Render configuration is included in `Dockerfile` and `render.yaml`.
+- **Android:** Capacitor scripts are available in `identity/package.json`.
 
-The Pages site returned HTTP 200 during the latest audit. The backend hostname configured in the clients did not respond during that check, so this README does not claim that the production API is currently healthy.
-
-## Demo and screenshots
-
-Real product captures should be added for:
-
-- marketplace and product detail;
-- NFT/product creation;
-- CRM and delivery workflows;
-- admin company review;
-- QR/NFC verification;
-- Android/mobile layout.
+Production backend availability and dependency remediation remain open operational tasks.
 
 ## Security
 
@@ -177,13 +165,12 @@ Real product captures should be added for:
 - Restrict Firebase client keys to the required APIs, applications, and domains.
 - Enforce Firebase Security Rules and App Check where applicable.
 - Keep `ADMIN_UIDS` and service-account credentials in the deployment secret manager.
-- Secret scanning and push protection should be enabled for this public repository.
+- Enable secret scanning and push protection for this public repository.
 
-## Status
+## Project status
 
-Active product prototype with working build paths for the API, administration interface, web client, and Android wrapper. Production backend availability and dependency remediation remain open operational tasks.
+Active product prototype with working build paths for the API, administration interface, web client, and Android wrapper.
 
 ## My contribution
 
 I authored and maintain the architecture and implementation represented in this repository: Rust API development, Firebase services, React clients, marketplace and CRM flows, QR/NFC verification, blockchain integration, containerisation, and deployment configuration. The commit history is authored under variants of my name, Alan Kharisov.
-
